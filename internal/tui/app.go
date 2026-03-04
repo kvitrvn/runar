@@ -175,7 +175,7 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case views.InvoicesLoadedMsg, views.InvoiceSavedMsg, views.InvoicePaidMsg, views.InvoiceDeletedMsg,
-		views.InvoiceIssuedMsg, views.InvoiceSentMsg:
+		views.InvoiceIssuedMsg, views.InvoiceSentMsg, views.InvoiceDetailLoadedMsg:
 		var cmd tea.Cmd
 		m.invoicesView, cmd = m.invoicesView.Update(msg)
 		cmds = append(cmds, cmd)
@@ -197,7 +197,7 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.creditNotesView.OpenFormForInvoice(msg.InvoiceID, msg.InvoiceNumber, msg.TotalHT, msg.VATAmount)
 		return m, m.creditNotesView.Load()
 
-	case views.CreditNotesLoadedMsg, views.CreditNoteSavedMsg:
+	case views.CreditNotesLoadedMsg, views.CreditNoteSavedMsg, views.CreditNoteDetailLoadedMsg:
 		var cmd tea.Cmd
 		m.creditNotesView, cmd = m.creditNotesView.Update(msg)
 		cmds = append(cmds, cmd)
@@ -214,7 +214,7 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 
-	case views.QuotesLoadedMsg, views.QuoteSavedMsg, views.QuoteStateChangedMsg:
+	case views.QuotesLoadedMsg, views.QuoteSavedMsg, views.QuoteStateChangedMsg, views.QuoteDetailLoadedMsg:
 		var cmd tea.Cmd
 		m.quotesView, cmd = m.quotesView.Update(msg)
 		cmds = append(cmds, cmd)
@@ -555,7 +555,13 @@ func (m *App) renderMainPane(mainH int) string {
 		if padLeft < 0 {
 			padLeft = 0
 		}
-		return strings.Repeat("\n", padTop) + strings.Repeat(" ", padLeft) + helpPanel
+		// Préfixer CHAQUE ligne du panneau pour le centrer horizontalement
+		lines := strings.Split(helpPanel, "\n")
+		pad := strings.Repeat(" ", padLeft)
+		for i, l := range lines {
+			lines[i] = pad + l
+		}
+		return strings.Repeat("\n", padTop) + strings.Join(lines, "\n")
 	}
 
 	title, content := m.renderActiveView()

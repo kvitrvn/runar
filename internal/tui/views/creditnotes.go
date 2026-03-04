@@ -28,6 +28,7 @@ const (
 type CreditNotesLoadedMsg struct{ CreditNotes []domain.CreditNote; Err error }
 type CreditNoteSavedMsg struct{ Err error }
 type CreditNotePDFMsg struct{ Path string; Err error }
+type CreditNoteDetailLoadedMsg struct{ CreditNote *domain.CreditNote; Err error }
 
 // CreditNotesView est la vue de gestion des avoirs.
 type CreditNotesView struct {
@@ -124,6 +125,15 @@ func (v CreditNotesView) Update(msg tea.Msg) (CreditNotesView, tea.Cmd) {
 			// Le PDF est généré — on pourrait l'ouvrir avec xdg-open (Sprint 6)
 		}
 
+	case CreditNoteDetailLoadedMsg:
+		if msg.Err != nil {
+			v.err = msg.Err.Error()
+		} else {
+			v.selected = msg.CreditNote
+			v.mode = CreditNoteModeDetail
+			v.err = ""
+		}
+
 	case tea.KeyMsg:
 		switch v.mode {
 		case CreditNoteModeList:
@@ -150,12 +160,10 @@ func (v CreditNotesView) handleListKey(msg tea.KeyMsg) (CreditNotesView, tea.Cmd
 		if row != nil {
 			var id int
 			fmt.Sscanf(row[0], "%d", &id)
-			for i := range v.cns {
-				if v.cns[i].ID == id {
-					v.selected = &v.cns[i]
-					v.mode = CreditNoteModeDetail
-					break
-				}
+			svc := v.services.CreditNote
+			return v, func() tea.Msg {
+				cn, err := svc.GetByID(id)
+				return CreditNoteDetailLoadedMsg{CreditNote: cn, Err: err}
 			}
 		}
 	case "p":
@@ -273,23 +281,57 @@ func (v CreditNotesView) renderDetail() string {
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(lipgloss.Color("#7C3AED")).
 		Padding(1, 2).
 		Width(v.width - 4)
 
 	label := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Width(20)
 	value := lipgloss.NewStyle().Foreground(lipgloss.Color("#F9FAFB"))
-	row := func(l, val string) string { return label.Render(l) + value.Render(val) + "\n" }
+	rowFn := func(l, val string) string { return label.Render(l) + value.Render(val) + "\n" }
 
 	var content strings.Builder
 	content.WriteString(styles.StyleTitle.Render("AVOIR "+cn.Number) + "\n\n")
-	content.WriteString(row("Numéro", cn.Number))
-	content.WriteString(row("Facture d'origine", cn.InvoiceReference))
-	content.WriteString(row("Date", cn.IssueDate.Format("02/01/2006")))
-	content.WriteString(row("Motif", cn.Reason))
+
+	content.WriteString(rowFn("Numéro", cn.Number))
+	content.WriteString(rowFn("Facture d'origine", cn.InvoiceReference))
+	if cn.Client != nil {
+		content.WriteString(rowFn("Client", cn.Client.Name))
+	}
+	content.WriteString(rowFn("Date", cn.IssueDate.Format("02/01/2006")))
+	content.WriteString(rowFn("Motif", cn.Reason))
 	content.WriteString("\n")
+
+	// Lignes
+	if len(cn.Lines) > 0 {
+		hd := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
+		content.WriteString(
+			"  "+hd.Copy().Width(30).Render("DESCRIPTION")+
+				"  "+hd.Copy().Width(6).Align(lipgloss.Right).Render("QTÉ")+
+				"  "+hd.Copy().Width(12).Align(lipgloss.Right).Render("PU HT")+
+				"  "+hd.Copy().Width(12).Align(lipgloss.Right).Render("TOTAL HT")+"\n")
+		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
+			Render(strings.Repeat("─", 68)) + "\n")
+		rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#D1D5DB"))
+		for _, line := range cn.Lines {
+			content.WriteString(rowStyle.Render(fmt.Sprintf("  %-30s  %6s  %11s€  %11s€",
+				truncate(line.Description, 30),
+				line.Quantity.StringFixed(2),
+				line.UnitPriceHT.StringFixed(2),
+				line.TotalHT.StringFixed(2),
+			)) + "\n")
+		}
+		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
+			Render(strings.Repeat("─", 68)) + "\n")
+	}
+
+	// Totaux
 	totalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true)
-	content.WriteString(totalStyle.Render(fmt.Sprintf("  Total TTC : %s €", cn.TotalTTC.StringFixed(2))) + "\n")
+	content.WriteString(totalStyle.Render(fmt.Sprintf("  %-50s%11s€", "TOTAL HT", cn.TotalHT.StringFixed(2))) + "\n")
+	if !cn.VATAmount.IsZero() {
+		content.WriteString(totalStyle.Render(fmt.Sprintf("  %-50s%11s€", "TVA", cn.VATAmount.StringFixed(2))) + "\n")
+	}
+	content.WriteString(totalStyle.Render(fmt.Sprintf("  %-50s%11s€", "TOTAL TTC", cn.TotalTTC.StringFixed(2))) + "\n")
+
 	if cn.PDFPath != "" {
 		content.WriteString("\n" + styles.StyleSuccess.Render("  PDF : "+cn.PDFPath) + "\n")
 	}

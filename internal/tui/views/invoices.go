@@ -36,6 +36,7 @@ type InvoiceDeletedMsg struct{ Err error }
 type InvoiceIssuedMsg struct{ Err error }
 type InvoiceSentMsg struct{ Err error }
 type InvoicePDFMsg struct{ Path string; Err error }
+type InvoiceDetailLoadedMsg struct{ Invoice *domain.Invoice; Err error }
 type OpenCreditNoteFormMsg struct {
 	InvoiceID     int
 	InvoiceNumber string
@@ -275,6 +276,15 @@ func (v InvoicesView) Update(msg tea.Msg) (InvoicesView, tea.Cmd) {
 			v.err = ""
 		}
 
+	case InvoiceDetailLoadedMsg:
+		if msg.Err != nil {
+			v.err = msg.Err.Error()
+		} else {
+			v.selected = msg.Invoice
+			v.mode = InvoiceModeDetail
+			v.err = ""
+		}
+
 	case tea.KeyMsg:
 		switch v.mode {
 		case InvoiceModeList:
@@ -365,8 +375,12 @@ func (v InvoicesView) handleListKey(msg tea.KeyMsg) (InvoicesView, tea.Cmd) {
 	case "enter":
 		sel := v.selectedInvoice()
 		if sel != nil {
-			v.selected = sel
-			v.mode = InvoiceModeDetail
+			svc := v.services.Invoice
+			id := sel.ID
+			return v, func() tea.Msg {
+				inv, err := svc.GetByID(id)
+				return InvoiceDetailLoadedMsg{Invoice: inv, Err: err}
+			}
 		}
 	default:
 		updated, cmd := v.table.Update(msg)
@@ -674,11 +688,16 @@ func (v InvoicesView) renderForm() string {
 		sb.WriteString(styles.StyleMuted.Render("  Aucune ligne. Appuyez sur 'a' pour ajouter.\n\n"))
 	} else {
 		// Afficher les lignes existantes
-		headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
-		sb.WriteString(headerStyle.Render(fmt.Sprintf("  %-40s  %8s  %12s  %12s\n",
-			"DESCRIPTION", "QTÉ", "PRIX HT", "TOTAL HT")))
+		// Width() pour chaque cellule header → gère correctement les chars multi-octets (QTÉ)
+		// et aligne avec les données (%12s€ = 13 chars visuels → Width(13))
+		hs := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
+		sb.WriteString(
+			"  "+hs.Copy().Width(40).Render("DESCRIPTION")+
+				"  "+hs.Copy().Width(8).Align(lipgloss.Right).Render("QTÉ")+
+				"  "+hs.Copy().Width(13).Align(lipgloss.Right).Render("PRIX HT")+
+				"  "+hs.Copy().Width(13).Align(lipgloss.Right).Render("TOTAL HT")+"\n")
 		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
-			Render("  " + strings.Repeat("─", 76) + "\n"))
+			Render(strings.Repeat("─", 82)) + "\n")
 
 		for i, line := range v.form.lines {
 			qty, _ := decimal.NewFromString(line.quantity)
@@ -706,16 +725,14 @@ func (v InvoicesView) renderForm() string {
 			inv.CalculateTotals()
 			sb.WriteString("\n")
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
-				Render("  "+strings.Repeat("─", 76)+"\n"))
+				Render(strings.Repeat("─", 82)) + "\n")
 			totalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true)
-			sb.WriteString(totalStyle.Render(fmt.Sprintf("  %-52s  %12s€\n",
-				"TOTAL HT", inv.TotalHT.StringFixed(2))))
+			// %-67s aligne le montant en bout de la colonne TOTAL HT (pos 82)
+			sb.WriteString(totalStyle.Render(fmt.Sprintf("  %-67s%12s€", "TOTAL HT", inv.TotalHT.StringFixed(2))) + "\n")
 			if v.form.cfg.VAT.Applicable {
-				sb.WriteString(totalStyle.Render(fmt.Sprintf("  %-52s  %12s€\n",
-					"TVA", inv.VATAmount.StringFixed(2))))
+				sb.WriteString(totalStyle.Render(fmt.Sprintf("  %-67s%12s€", "TVA", inv.VATAmount.StringFixed(2))) + "\n")
 			}
-			sb.WriteString(totalStyle.Render(fmt.Sprintf("  %-52s  %12s€\n",
-				"TOTAL TTC", inv.TotalTTC.StringFixed(2))))
+			sb.WriteString(totalStyle.Render(fmt.Sprintf("  %-67s%12s€", "TOTAL TTC", inv.TotalTTC.StringFixed(2))) + "\n")
 		}
 	}
 
@@ -776,6 +793,11 @@ func (v InvoicesView) renderDetail() string {
 
 	// Infos facture
 	content.WriteString(row("Numéro", inv.Number))
+	clientLabel := fmt.Sprint(inv.ClientID)
+	if inv.Client != nil {
+		clientLabel = inv.Client.Name
+	}
+	content.WriteString(row("Client", clientLabel))
 	content.WriteString(row("État", styles.RenderInvoiceState(inv.State, isOverdue)))
 	content.WriteString(row("Date émission", inv.IssueDate.Format("02/01/2006")))
 	content.WriteString(row("Date échéance", inv.DueDate.Format("02/01/2006")))
@@ -789,42 +811,50 @@ func (v InvoicesView) renderDetail() string {
 
 	// Lignes
 	if len(inv.Lines) > 0 {
-		hdr := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
-		content.WriteString(hdr.Render(fmt.Sprintf("  %-38s  %8s  %12s\n",
-			"DESCRIPTION", "QTÉ", "TOTAL HT")))
+		// 4 colonnes : desc(30) + qty(6) + pu(12) + total(12) = 2+30+2+6+2+12+2+12 = 68 chars
+		hd := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
+		content.WriteString(
+			"  "+hd.Copy().Width(30).Render("DESCRIPTION")+
+				"  "+hd.Copy().Width(6).Align(lipgloss.Right).Render("QTÉ")+
+				"  "+hd.Copy().Width(12).Align(lipgloss.Right).Render("PU HT")+
+				"  "+hd.Copy().Width(12).Align(lipgloss.Right).Render("TOTAL HT")+"\n")
 		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
-			Render("  " + strings.Repeat("─", 62) + "\n"))
+			Render(strings.Repeat("─", 68)) + "\n")
+		rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#D1D5DB"))
 		for _, line := range inv.Lines {
-			content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#D1D5DB")).
-				Render(fmt.Sprintf("  %-38s  %8s  %12s€\n",
-					truncate(line.Description, 38),
-					line.Quantity.StringFixed(2),
-					line.TotalHT.StringFixed(2),
-				)))
+			content.WriteString(rowStyle.Render(fmt.Sprintf("  %-30s  %6s  %11s€  %11s€",
+				truncate(line.Description, 30),
+				line.Quantity.StringFixed(2),
+				line.UnitPriceHT.StringFixed(2),
+				line.TotalHT.StringFixed(2),
+			)) + "\n")
 		}
 		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
-			Render("  " + strings.Repeat("─", 62) + "\n"))
+			Render(strings.Repeat("─", 68)) + "\n")
 	}
 
-	// Totaux
+	// Totaux — label sur 50 chars, montant aligné à droite sur 13 chars
 	totalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true)
-	content.WriteString(totalStyle.Render(fmt.Sprintf("  %-50s %12s€\n", "TOTAL HT", inv.TotalHT.StringFixed(2))))
+	content.WriteString(totalStyle.Render(fmt.Sprintf("  %-50s%12s€", "TOTAL HT", inv.TotalHT.StringFixed(2))) + "\n")
 	if inv.VATApplicable {
-		content.WriteString(totalStyle.Render(fmt.Sprintf("  %-50s %12s€\n", "TVA", inv.VATAmount.StringFixed(2))))
+		content.WriteString(totalStyle.Render(fmt.Sprintf("  %-50s%12s€", "TVA", inv.VATAmount.StringFixed(2))) + "\n")
 	} else {
 		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).
-			Render("  "+domain.VATMentionExemption+"\n"))
+			Render("  "+domain.VATMentionExemption) + "\n")
 	}
-	content.WriteString(totalStyle.Render(fmt.Sprintf("  %-50s %12s€\n", "TOTAL TTC", inv.TotalTTC.StringFixed(2))))
+	content.WriteString(totalStyle.Render(fmt.Sprintf("  %-50s%12s€", "TOTAL TTC", inv.TotalTTC.StringFixed(2))) + "\n")
 	content.WriteString("\n")
 
 	// Conditions paiement
 	pmt := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
-	content.WriteString(pmt.Render(fmt.Sprintf("  Délai: %s  |  Pénalités: %s%%/an  |  Indemnité: %s€\n",
+	content.WriteString(pmt.Render(fmt.Sprintf("  Délai: %s  |  Pénalités: %s%%/an  |  Indemnité: %s€",
 		inv.PaymentDeadline,
 		inv.LatePenaltyRate.StringFixed(2),
 		inv.RecoveryFee.StringFixed(0),
-	)))
+	)) + "\n")
+	if inv.PaymentRef != "" {
+		content.WriteString(pmt.Render("  Libellé virement : "+inv.PaymentRef) + "\n")
+	}
 
 	// PDFPath
 	if inv.PDFPath != "" {
@@ -892,21 +922,26 @@ func (v InvoicesView) renderConfirmDelete() string {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 func invoiceColumns(width int) []table.Column {
-	// Colonnes fixes : ID(5)+NUMÉRO(12)+MONTANT TTC(13)+ÉTAT(14)+ÉCHÉANCE(12) = 56 + 6*2 padding = 68
-	clientW := max(16, width-68)
+	// ID(5)+NUMÉRO(12)+TTC(13)+ÉTAT(12)+ÉCHÉANCE(12)+VIR(12) = 66 + 7cols*2pad = 80 → CLIENT adaptatif plafonné
+	clientW := min(24, max(16, width-90))
 	return []table.Column{
 		{Title: "ID", Width: 5},
 		{Title: "NUMÉRO", Width: 12},
 		{Title: "CLIENT", Width: clientW},
 		{Title: "MONTANT TTC", Width: 13},
-		{Title: "ÉTAT", Width: 14},
+		{Title: "ÉTAT", Width: 12},
 		{Title: "ÉCHÉANCE", Width: 12},
+		{Title: "LIBELLÉ VIR", Width: 12},
 	}
 }
 
 func invoiceRows(invoices []domain.Invoice) []table.Row {
 	rows := make([]table.Row, len(invoices))
 	for i, inv := range invoices {
+		clientName := fmt.Sprint(inv.ClientID)
+		if inv.Client != nil {
+			clientName = inv.Client.Name
+		}
 		stateStr := string(inv.State)
 		if inv.IsOverdue() {
 			stateStr = "ÉCHUE"
@@ -914,10 +949,11 @@ func invoiceRows(invoices []domain.Invoice) []table.Row {
 		rows[i] = table.Row{
 			fmt.Sprint(inv.ID),
 			inv.Number,
-			fmt.Sprint(inv.ClientID), // sera remplacé par client name en Sprint 5
+			clientName,
 			inv.TotalTTC.StringFixed(2) + "€",
 			stateStr,
-			inv.DueDate.Format("02/01/2006"),
+			inv.DueDate.Format("02/01/06"),
+			inv.PaymentRef,
 		}
 	}
 	return rows

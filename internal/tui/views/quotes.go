@@ -32,6 +32,7 @@ type QuoteSavedMsg struct{ Err error }
 type QuotePDFMsg struct{ Path string; Err error }
 type QuoteStateChangedMsg struct{ Err error }
 type QuoteConvertedMsg struct{ InvoiceNumber string; Err error }
+type QuoteDetailLoadedMsg struct{ Quote *domain.Quote; Err error }
 
 // ─── QuoteForm (formulaire multi-étapes) ─────────────────────────────────────
 
@@ -217,6 +218,15 @@ func (v QuotesView) Update(msg tea.Msg) (QuotesView, tea.Cmd) {
 		v.mode = QuoteModeList
 		v.selected = nil
 
+	case QuoteDetailLoadedMsg:
+		if msg.Err != nil {
+			v.err = msg.Err.Error()
+		} else {
+			v.selected = msg.Quote
+			v.mode = QuoteModeDetail
+			v.err = ""
+		}
+
 	case tea.KeyMsg:
 		switch v.mode {
 		case QuoteModeList:
@@ -272,8 +282,12 @@ func (v QuotesView) handleListKey(msg tea.KeyMsg) (QuotesView, tea.Cmd) {
 		}
 	case "enter":
 		if sel := v.selectedQuote(); sel != nil {
-			v.selected = sel
-			v.mode = QuoteModeDetail
+			svc := v.services.Quote
+			id := sel.ID
+			return v, func() tea.Msg {
+				q, err := svc.GetByID(id)
+				return QuoteDetailLoadedMsg{Quote: q, Err: err}
+			}
 		}
 	default:
 		updated, cmd := v.table.Update(msg)
@@ -526,11 +540,14 @@ func (v QuotesView) renderForm() string {
 	if len(v.form.lines) == 0 {
 		sb.WriteString(styles.StyleMuted.Render("  Aucune ligne. Appuyez sur 'a' pour ajouter.\n\n"))
 	} else {
-		headerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
-		sb.WriteString(headerStyle.Render(fmt.Sprintf("  %-40s  %8s  %12s  %12s\n",
-			"DESCRIPTION", "QTÉ", "PRIX HT", "TOTAL HT")))
+		hs := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
+		sb.WriteString(
+			"  "+hs.Copy().Width(40).Render("DESCRIPTION")+
+				"  "+hs.Copy().Width(8).Align(lipgloss.Right).Render("QTÉ")+
+				"  "+hs.Copy().Width(13).Align(lipgloss.Right).Render("PRIX HT")+
+				"  "+hs.Copy().Width(13).Align(lipgloss.Right).Render("TOTAL HT")+"\n")
 		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
-			Render("  " + strings.Repeat("─", 76) + "\n"))
+			Render(strings.Repeat("─", 82)) + "\n")
 
 		for i, line := range v.form.lines {
 			qty, _ := decimal.NewFromString(line.quantity)
@@ -557,13 +574,13 @@ func (v QuotesView) renderForm() string {
 			q.CalculateTotals()
 			sb.WriteString("\n")
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
-				Render("  " + strings.Repeat("─", 76) + "\n"))
+				Render(strings.Repeat("─", 82)) + "\n")
 			totalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5CF6")).Bold(true)
-			sb.WriteString(totalStyle.Render(fmt.Sprintf("  %-52s  %12s€\n", "TOTAL HT", q.TotalHT.StringFixed(2))))
+			sb.WriteString(totalStyle.Render(fmt.Sprintf("  %-67s%12s€", "TOTAL HT", q.TotalHT.StringFixed(2))) + "\n")
 			if v.form.cfg.VAT.Applicable {
-				sb.WriteString(totalStyle.Render(fmt.Sprintf("  %-52s  %12s€\n", "TVA", q.VATAmount.StringFixed(2))))
+				sb.WriteString(totalStyle.Render(fmt.Sprintf("  %-67s%12s€", "TVA", q.VATAmount.StringFixed(2))) + "\n")
 			}
-			sb.WriteString(totalStyle.Render(fmt.Sprintf("  %-52s  %12s€\n", "TOTAL TTC", q.TotalTTC.StringFixed(2))))
+			sb.WriteString(totalStyle.Render(fmt.Sprintf("  %-67s%12s€", "TOTAL TTC", q.TotalTTC.StringFixed(2))) + "\n")
 		}
 	}
 
@@ -608,6 +625,11 @@ func (v QuotesView) renderDetail() string {
 	}
 
 	content.WriteString(row("Numéro", q.Number))
+	clientLabel := fmt.Sprint(q.ClientID)
+	if q.Client != nil {
+		clientLabel = q.Client.Name
+	}
+	content.WriteString(row("Client", clientLabel))
 	content.WriteString(row("État", renderQuoteState(q.State)))
 	content.WriteString(row("Date émission", q.IssueDate.Format("02/01/2006")))
 	content.WriteString(row("Date expiration", q.ExpiryDate.Format("02/01/2006")))
@@ -617,25 +639,30 @@ func (v QuotesView) renderDetail() string {
 	content.WriteString("\n")
 
 	if len(q.Lines) > 0 {
-		hdr := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
-		content.WriteString(hdr.Render(fmt.Sprintf("  %-38s  %8s  %12s\n", "DESCRIPTION", "QTÉ", "TOTAL HT")))
+		hd := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
+		content.WriteString(
+			"  "+hd.Copy().Width(30).Render("DESCRIPTION")+
+				"  "+hd.Copy().Width(6).Align(lipgloss.Right).Render("QTÉ")+
+				"  "+hd.Copy().Width(12).Align(lipgloss.Right).Render("PU HT")+
+				"  "+hd.Copy().Width(12).Align(lipgloss.Right).Render("TOTAL HT")+"\n")
 		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
-			Render("  " + strings.Repeat("─", 62) + "\n"))
+			Render(strings.Repeat("─", 68)) + "\n")
+		rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#D1D5DB"))
 		for _, line := range q.Lines {
-			content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#D1D5DB")).
-				Render(fmt.Sprintf("  %-38s  %8s  %12s€\n",
-					truncate(line.Description, 38),
-					line.Quantity.StringFixed(2),
-					line.TotalHT.StringFixed(2),
-				)))
+			content.WriteString(rowStyle.Render(fmt.Sprintf("  %-30s  %6s  %11s€  %11s€",
+				truncate(line.Description, 30),
+				line.Quantity.StringFixed(2),
+				line.UnitPriceHT.StringFixed(2),
+				line.TotalHT.StringFixed(2),
+			)) + "\n")
 		}
 		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
-			Render("  " + strings.Repeat("─", 62) + "\n"))
+			Render(strings.Repeat("─", 68)) + "\n")
 	}
 
 	totalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5CF6")).Bold(true)
-	content.WriteString(totalStyle.Render(fmt.Sprintf("  %-50s %12s€\n", "TOTAL HT", q.TotalHT.StringFixed(2))))
-	content.WriteString(totalStyle.Render(fmt.Sprintf("  %-50s %12s€\n", "TOTAL TTC", q.TotalTTC.StringFixed(2))))
+	content.WriteString(totalStyle.Render(fmt.Sprintf("  %-50s%12s€", "TOTAL HT", q.TotalHT.StringFixed(2))) + "\n")
+	content.WriteString(totalStyle.Render(fmt.Sprintf("  %-50s%12s€", "TOTAL TTC", q.TotalTTC.StringFixed(2))) + "\n")
 	if q.PDFPath != "" {
 		content.WriteString("\n" + styles.StyleSuccess.Render("  PDF : "+q.PDFPath) + "\n")
 	}
