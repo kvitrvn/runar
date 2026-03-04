@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kvitrvn/runar/internal/config"
 	"github.com/kvitrvn/runar/internal/service"
-	"github.com/kvitrvn/runar/internal/tui/components"
 	"github.com/kvitrvn/runar/internal/tui/styles"
 	"github.com/kvitrvn/runar/internal/tui/views"
 )
@@ -21,21 +20,22 @@ type tickMsg time.Time
 
 // App est le modèle principal de l'application TUI.
 type App struct {
-	services    *service.Services
-	config      *config.Config
-	width       int
-	height      int
+	services *service.Services
+	config   *config.Config
+	width    int
+	height   int
+
 	currentView ViewType
 	mode        AppMode
 
-	// Composants
-	commandBar components.CommandBar
-	statusBar  components.StatusBar
+	// Vues (chargées à la demande)
+	clientsView  views.ClientsView
+	invoicesView views.InvoicesView
 
-	// Saisie active (commande ou recherche)
+	// Saisie commande / recherche
 	input textinput.Model
 
-	// Toast courant (notification temporaire)
+	// Toast courant
 	toast *Toast
 
 	// Filtre de recherche actif
@@ -49,20 +49,19 @@ func NewApp(services *service.Services, cfg *config.Config) *App {
 	ti.CharLimit = 64
 
 	return &App{
-		services:    services,
-		config:      cfg,
-		currentView: ViewPulse,
-		mode:        ModeNormal,
-		input:       ti,
+		services:     services,
+		config:       cfg,
+		currentView:  ViewPulse,
+		mode:         ModeNormal,
+		input:        ti,
+		clientsView:  views.NewClientsView(services, 80, 20),
+		invoicesView: views.NewInvoicesView(services, cfg, 80, 20),
 	}
 }
 
 // Init implémente tea.Model.
 func (m *App) Init() tea.Cmd {
-	return tea.Batch(
-		textinput.Blink,
-		tickCmd(),
-	)
+	return tea.Batch(textinput.Blink, tickCmd())
 }
 
 func tickCmd() tea.Cmd {
@@ -79,70 +78,130 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		mainH := m.height - 3
+		m.clientsView.SetSize(m.width, mainH)
+		m.invoicesView.SetSize(m.width, mainH)
 
 	case tickMsg:
-		// Nettoyer toast expiré
 		if m.toast != nil && !m.toast.IsVisible() {
 			m.toast = nil
 		}
 		cmds = append(cmds, tickCmd())
 
 	case tea.KeyMsg:
-		switch m.mode {
-		case ModeCommand:
-			cmds = append(cmds, m.handleCommandKey(msg)...)
-		case ModeSearch:
-			cmds = append(cmds, m.handleSearchKey(msg)...)
-		case ModeHelp:
-			cmds = append(cmds, m.handleHelpKey(msg)...)
-		default:
-			cmds = append(cmds, m.handleNormalKey(msg)...)
+		// Les touches globales (Ctrl+C, :, /, ?) ne sont interceptées
+		// que si la vue active n'a pas de saisie en cours.
+		activeInputBusy := m.isActiveViewInputBusy()
+
+		if !activeInputBusy {
+			switch m.mode {
+			case ModeCommand:
+				if cmd := m.handleCommandKey(msg); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				// Mettre à jour l'input de saisie
+				updated, inputCmd := m.input.Update(msg)
+				m.input = updated
+				cmds = append(cmds, inputCmd)
+				return m, tea.Batch(cmds...)
+			case ModeSearch:
+				if cmd := m.handleSearchKey(msg); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				updated, inputCmd := m.input.Update(msg)
+				m.input = updated
+				cmds = append(cmds, inputCmd)
+				return m, tea.Batch(cmds...)
+			case ModeHelp:
+				m.handleHelpKey(msg)
+				return m, nil
+			default:
+				// Touches globales mode Normal
+				switch msg.String() {
+				case "ctrl+c":
+					return m, tea.Quit
+				case ":":
+					m.enterCommandMode()
+					return m, textinput.Blink
+				case "/":
+					m.enterSearchMode()
+					return m, textinput.Blink
+				case "?":
+					m.mode = ModeHelp
+					return m, nil
+				case "q":
+					// Quitter seulement si on est sur une vue sans sous-mode actif
+					if !m.isViewInSubMode() {
+						return m, tea.Quit
+					}
+				case "tab":
+					m.cycleView()
+					cmd := m.loadCurrentView()
+					return m, cmd
+				}
+			}
 		}
+
+	// Messages des vues
+	case views.ClientsLoadedMsg, views.ClientSavedMsg, views.ClientDeletedMsg:
+		var cmd tea.Cmd
+		m.clientsView, cmd = m.clientsView.Update(msg)
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
+
+	case views.InvoicesLoadedMsg, views.InvoiceSavedMsg, views.InvoicePaidMsg, views.InvoiceDeletedMsg:
+		var cmd tea.Cmd
+		m.invoicesView, cmd = m.invoicesView.Update(msg)
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
 	}
 
-	// Mettre à jour l'input si actif
-	if m.mode == ModeCommand || m.mode == ModeSearch {
-		var inputCmd tea.Cmd
-		m.input, inputCmd = m.input.Update(msg)
-		cmds = append(cmds, inputCmd)
+	// Déléguer à la vue active
+	var viewCmd tea.Cmd
+	switch m.currentView {
+	case ViewClients:
+		m.clientsView, viewCmd = m.clientsView.Update(msg)
+	case ViewInvoices:
+		m.invoicesView, viewCmd = m.invoicesView.Update(msg)
+	}
+	if viewCmd != nil {
+		cmds = append(cmds, viewCmd)
 	}
 
 	return m, tea.Batch(cmds...)
 }
 
-// handleNormalKey gère les touches en mode normal.
-func (m *App) handleNormalKey(msg tea.KeyMsg) []tea.Cmd {
-	switch msg.String() {
-	case "ctrl+c":
-		return []tea.Cmd{tea.Quit}
-	case ":":
-		m.enterCommandMode()
-	case "/":
-		m.enterSearchMode()
-	case "?":
-		m.mode = ModeHelp
-	case "q":
-		return []tea.Cmd{tea.Quit}
-	case "tab":
-		m.cycleView()
+// isActiveViewInputBusy retourne true si la vue active a un champ texte focalisé.
+func (m *App) isActiveViewInputBusy() bool {
+	switch m.currentView {
+	case ViewClients:
+		return m.clientsView.IsInputActive()
+	case ViewInvoices:
+		return m.invoicesView.IsInputActive()
 	}
-	return nil
+	return false
+}
+
+// isViewInSubMode retourne true si la vue active est dans un sous-mode (detail, form…).
+func (m *App) isViewInSubMode() bool {
+	// Pour l'instant on ne peut pas interroger le mode interne des vues directement,
+	// donc on considère qu'on peut quitter si l'input n'est pas actif.
+	return false
 }
 
 // handleCommandKey gère les touches en mode commande.
-func (m *App) handleCommandKey(msg tea.KeyMsg) []tea.Cmd {
+func (m *App) handleCommandKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		m.exitInputMode()
 	case "enter":
-		m.executeCommand(m.input.Value())
+		cmd := m.executeCommand(m.input.Value())
 		m.exitInputMode()
+		return cmd
 	case "tab":
-		// Autocomplétion : prendre la première suggestion
 		suggestions := Autocomplete(m.input.Value())
 		if len(suggestions) > 0 {
 			m.input.SetValue(suggestions[0].Name)
-			// Repositionner le curseur à la fin
 			m.input.CursorEnd()
 		}
 	}
@@ -150,7 +209,7 @@ func (m *App) handleCommandKey(msg tea.KeyMsg) []tea.Cmd {
 }
 
 // handleSearchKey gère les touches en mode recherche.
-func (m *App) handleSearchKey(msg tea.KeyMsg) []tea.Cmd {
+func (m *App) handleSearchKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "esc":
 		m.searchQuery = ""
@@ -158,70 +217,77 @@ func (m *App) handleSearchKey(msg tea.KeyMsg) []tea.Cmd {
 	case "enter":
 		m.searchQuery = m.input.Value()
 		m.exitInputMode()
-		if m.searchQuery != "" {
-			m.showToast(fmt.Sprintf("Filtre actif : %q", m.searchQuery), ToastInfo)
-		}
+		return m.loadCurrentView()
 	}
 	return nil
 }
 
 // handleHelpKey gère les touches en mode aide.
-func (m *App) handleHelpKey(msg tea.KeyMsg) []tea.Cmd {
+func (m *App) handleHelpKey(msg tea.KeyMsg) {
 	switch msg.String() {
 	case "?", "esc", "q":
 		m.mode = ModeNormal
 	}
-	return nil
 }
 
-// enterCommandMode active le mode commande.
 func (m *App) enterCommandMode() {
 	m.mode = ModeCommand
 	m.input.SetValue("")
 	m.input.Focus()
 }
 
-// enterSearchMode active le mode recherche.
 func (m *App) enterSearchMode() {
 	m.mode = ModeSearch
 	m.input.SetValue("")
 	m.input.Focus()
 }
 
-// exitInputMode revient en mode normal.
 func (m *App) exitInputMode() {
 	m.mode = ModeNormal
 	m.input.SetValue("")
 	m.input.Blur()
 }
 
-// executeCommand exécute la commande saisie.
-func (m *App) executeCommand(raw string) {
+// executeCommand exécute la commande saisie et charge la vue si nécessaire.
+func (m *App) executeCommand(raw string) tea.Cmd {
 	cmd := ParseCommand(raw)
 	if cmd == nil {
-		m.showToast(fmt.Sprintf("Commande inconnue : %q  (tapez :help)", raw), ToastError)
-		return
+		m.showToast(fmt.Sprintf("Commande inconnue : %q", raw), ToastError)
+		return nil
 	}
 	if cmd.IsQuit {
-		// Sera traité via tea.Quit dans le prochain Update
-		// On fait ça en passant par un message clavier synthétique
-		// mais le plus simple est de quitter directement
-		return
+		return tea.Quit
 	}
 	if cmd.Name == "help" {
 		m.mode = ModeHelp
-		return
+		return nil
 	}
+	prev := m.currentView
 	m.currentView = cmd.View
 	m.searchQuery = ""
+	if m.currentView != prev {
+		return m.loadCurrentView()
+	}
+	return nil
+}
+
+// loadCurrentView déclenche le chargement des données pour la vue courante.
+func (m *App) loadCurrentView() tea.Cmd {
+	switch m.currentView {
+	case ViewClients:
+		return m.clientsView.Load(m.searchQuery)
+	case ViewInvoices:
+		return m.invoicesView.Load(m.searchQuery)
+	}
+	return nil
 }
 
 // cycleView passe à la vue suivante.
 func (m *App) cycleView() {
-	views := []ViewType{ViewPulse, ViewClients, ViewInvoices, ViewQuotes, ViewCreditNotes}
-	for i, v := range views {
+	allViews := []ViewType{ViewPulse, ViewClients, ViewInvoices, ViewQuotes, ViewCreditNotes}
+	for i, v := range allViews {
 		if v == m.currentView {
-			m.currentView = views[(i+1)%len(views)]
+			m.currentView = allViews[(i+1)%len(allViews)]
 			return
 		}
 	}
@@ -233,7 +299,9 @@ func (m *App) showToast(msg string, kind ToastType) {
 	m.toast = &t
 }
 
-// View implémente tea.Model — rendu 4 zones.
+// ─── Rendu ───────────────────────────────────────────────────────────────────
+
+// View implémente tea.Model.
 func (m *App) View() string {
 	if m.width == 0 {
 		return "Chargement..."
@@ -241,48 +309,22 @@ func (m *App) View() string {
 
 	header := m.renderHeader()
 	commandBar := m.renderCommandBar()
-	mainPane := m.renderMainPane()
 	infoBar := m.renderInfoBar()
 
-	// Hauteur réservée aux zones fixes
-	fixedHeight := lipgloss.Height(header) +
-		lipgloss.Height(commandBar) +
-		lipgloss.Height(infoBar)
-	mainHeight := m.height - fixedHeight
-	if mainHeight < 1 {
-		mainHeight = 1
+	fixedH := lipgloss.Height(header) + lipgloss.Height(commandBar) + lipgloss.Height(infoBar)
+	mainH := m.height - fixedH
+	if mainH < 1 {
+		mainH = 1
 	}
 
-	// Si aide visible, overlay centré sur le main pane
-	if m.mode == ModeHelp {
-		helpPanel := views.RenderHelpPanel(m.width)
-		helpHeight := lipgloss.Height(helpPanel)
-		helpWidth := lipgloss.Width(helpPanel)
-		padTop := (mainHeight - helpHeight) / 2
-		padLeft := (m.width - helpWidth) / 2
-		if padTop < 0 {
-			padTop = 0
-		}
-		if padLeft < 0 {
-			padLeft = 0
-		}
-		mainPane = strings.Repeat("\n", padTop) +
-			strings.Repeat(" ", padLeft) + helpPanel
-	}
+	mainPane := m.renderMainPane(mainH)
 
-	return lipgloss.JoinVertical(lipgloss.Left,
-		header,
-		commandBar,
-		mainPane,
-		infoBar,
-	)
+	return lipgloss.JoinVertical(lipgloss.Left, header, commandBar, mainPane, infoBar)
 }
 
-// renderHeader rend la ligne d'en-tête.
 func (m *App) renderHeader() string {
 	year := time.Now().Year()
-
-	leftPart := fmt.Sprintf(" runar  %d  :%s", year, m.currentView.String())
+	left := fmt.Sprintf(" runar  %d  :%s", year, m.currentView.String())
 
 	modeLabel := ""
 	switch m.mode {
@@ -294,139 +336,121 @@ func (m *App) renderHeader() string {
 		modeLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5CF6")).Bold(true).Render(" [AIDE]")
 	}
 
-	// Vendeur depuis config
 	sellerName := ""
 	if m.config != nil {
 		sellerName = m.config.Seller.Name
 	}
-
-	rightPart := ""
+	right := ""
 	if sellerName != "" {
-		rightPart = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#9CA3AF")).
-			Render(sellerName + " ")
+		right = lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render(sellerName + " ")
 	}
 
-	totalText := leftPart + modeLabel
-	textWidth := lipgloss.Width(totalText) + lipgloss.Width(rightPart)
-	padWidth := m.width - textWidth
-	if padWidth < 0 {
-		padWidth = 0
+	content := left + modeLabel
+	pad := m.width - lipgloss.Width(content) - lipgloss.Width(right)
+	if pad < 0 {
+		pad = 0
 	}
-
-	return styles.StyleHeader.Width(m.width).Render(
-		totalText + strings.Repeat(" ", padWidth) + rightPart,
-	)
+	return styles.StyleHeader.Width(m.width).Render(content + strings.Repeat(" ", pad) + right)
 }
 
-// renderCommandBar rend la barre de commande.
 func (m *App) renderCommandBar() string {
 	baseStyle := lipgloss.NewStyle().
 		Background(lipgloss.Color("#111827")).
 		Foreground(lipgloss.Color("#F9FAFB")).
 		Padding(0, 1)
-
 	hintStyle := lipgloss.NewStyle().
 		Background(lipgloss.Color("#111827")).
 		Foreground(lipgloss.Color("#6B7280")).
 		Padding(0, 1)
-
-	prefixStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#0EA5E9")).
-		Bold(true)
+	prefixStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#0EA5E9")).Bold(true)
 
 	hint := "[?] Aide  [Tab] Vue suivante"
 	if m.mode == ModeCommand || m.mode == ModeSearch {
 		hint = "[Enter] Valider  [Esc] Annuler  [Tab] Compléter"
 	}
-	hintRendered := hintStyle.Render(hint)
-	hintWidth := lipgloss.Width(hintRendered)
-
-	leftWidth := m.width - hintWidth
-	if leftWidth < 1 {
-		leftWidth = 1
+	hintR := hintStyle.Render(hint)
+	leftW := m.width - lipgloss.Width(hintR)
+	if leftW < 1 {
+		leftW = 1
 	}
 
 	var leftContent string
 	switch m.mode {
 	case ModeCommand:
 		suggestions := Autocomplete(m.input.Value())
-		suggStr := ""
+		sugg := ""
 		if len(suggestions) > 0 {
 			names := make([]string, len(suggestions))
 			for i, s := range suggestions {
 				names[i] = s.Name
 			}
-			suggStr = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#374151")).
-				Render("  " + strings.Join(names, "  "))
+			sugg = lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).Render("  " + strings.Join(names, "  "))
 		}
-		leftContent = prefixStyle.Render(":") + m.input.View() + suggStr
+		leftContent = prefixStyle.Render(":") + m.input.View() + sugg
 	case ModeSearch:
 		leftContent = prefixStyle.Render("/") + m.input.View()
 	default:
 		filter := ""
 		if m.searchQuery != "" {
-			filter = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#F59E0B")).
+			filter = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).
 				Render(" [/" + m.searchQuery + "]")
 		}
 		leftContent = prefixStyle.Render(":") + m.currentView.String() + filter
 	}
 
-	left := baseStyle.Width(leftWidth).Render(leftContent)
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, hintRendered)
+	return lipgloss.JoinHorizontal(lipgloss.Top, baseStyle.Width(leftW).Render(leftContent), hintR)
 }
 
-// renderMainPane rend le contenu principal.
-func (m *App) renderMainPane() string {
-	fixedLines := 3 // header + commandbar + infobar
-	mainHeight := m.height - fixedLines
-	if mainHeight < 4 {
-		mainHeight = 4
+func (m *App) renderMainPane(mainH int) string {
+	// Mode aide : overlay centré
+	if m.mode == ModeHelp {
+		helpPanel := views.RenderHelpPanel(m.width)
+		helpH := lipgloss.Height(helpPanel)
+		helpW := lipgloss.Width(helpPanel)
+		padTop := (mainH - helpH) / 2
+		padLeft := (m.width - helpW) / 2
+		if padTop < 0 {
+			padTop = 0
+		}
+		if padLeft < 0 {
+			padLeft = 0
+		}
+		return strings.Repeat("\n", padTop) + strings.Repeat(" ", padLeft) + helpPanel
 	}
 
-	title, content := m.renderView()
+	title, content := m.renderActiveView()
 
-	inner := styles.StyleTitle.Render("─ "+title+" ") +
+	sep := styles.StyleTitle.Render("─ "+title+" ") +
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
-			Render(strings.Repeat("─", max(0, m.width-lipgloss.Width(title)-6))) + "\n" +
-		content
+			Render(strings.Repeat("─", maxInt(0, m.width-lipgloss.Width(title)-6)))
 
-	// Toast en bas du main pane si actif
+	// Toast superposé si présent
+	toastStr := ""
 	if m.toast != nil && m.toast.IsVisible() {
-		toastStr := m.renderToast()
-		inner += "\n" + toastStr
+		toastStr = "\n" + m.renderToast()
 	}
 
-	return lipgloss.NewStyle().Height(mainHeight).MaxHeight(mainHeight).Render(inner)
+	return lipgloss.NewStyle().Height(mainH).MaxHeight(mainH).Render(sep + "\n" + content + toastStr)
 }
 
-// renderView retourne le titre et contenu pour la vue courante.
-func (m *App) renderView() (string, string) {
+func (m *App) renderActiveView() (title, content string) {
 	switch m.currentView {
+	case ViewClients:
+		return "CLIENTS", m.clientsView.View()
+	case ViewInvoices:
+		return "FACTURES", m.invoicesView.View()
 	case ViewPulse:
-		return "DASHBOARD", m.renderPlaceholder(
+		return "DASHBOARD", renderPlaceholderView(
 			"Tableau de bord — Sprint 7",
 			[]string{"CA annuel", "Factures par état", "Alertes TVA", "Graphique mensuel"},
 		)
-	case ViewClients:
-		return "CLIENTS", m.renderPlaceholder(
-			"Liste des clients — Sprint 4",
-			[]string{"n: Nouveau  e: Éditer  d: Supprimer  f: Factures  Enter: Voir"},
-		)
-	case ViewInvoices:
-		return "FACTURES", m.renderPlaceholder(
-			"Liste des factures — Sprint 4",
-			[]string{"n: Nouvelle  e: Éditer  p: PDF  m: Marquer payée  c: Avoir"},
-		)
 	case ViewQuotes:
-		return "DEVIS", m.renderPlaceholder(
-			"Liste des devis — Sprint 5",
-			[]string{"n: Nouveau  e: Éditer  f: Convertir en facture  p: PDF"},
+		return "DEVIS", renderPlaceholderView(
+			"Liste des devis — Sprint 6",
+			[]string{"n: Nouveau  f: Convertir en facture  p: PDF"},
 		)
 	case ViewCreditNotes:
-		return "AVOIRS", m.renderPlaceholder(
+		return "AVOIRS", renderPlaceholderView(
 			"Liste des avoirs — Sprint 5",
 			[]string{"c: Créer avoir  p: PDF  Enter: Voir"},
 		)
@@ -434,26 +458,21 @@ func (m *App) renderView() (string, string) {
 	return "INCONNU", ""
 }
 
-// renderPlaceholder rend un panneau placeholder pour les vues Sprint 4+.
-func (m *App) renderPlaceholder(subtitle string, actions []string) string {
+func renderPlaceholderView(subtitle string, actions []string) string {
 	var sb strings.Builder
 	sb.WriteString("\n")
 	sb.WriteString(styles.StyleMuted.Render("  "+subtitle) + "\n\n")
 	for _, a := range actions {
-		sb.WriteString(lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#9CA3AF")).
-			Render("  "+a) + "\n")
+		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render("  "+a) + "\n")
 	}
 	return sb.String()
 }
 
-// renderInfoBar rend la barre d'information du bas.
 func (m *App) renderInfoBar() string {
 	baseStyle := lipgloss.NewStyle().
 		Background(lipgloss.Color("#1F2937")).
 		Foreground(lipgloss.Color("#6B7280")).
 		Padding(0, 1)
-
 	rightStyle := lipgloss.NewStyle().
 		Background(lipgloss.Color("#1F2937")).
 		Foreground(lipgloss.Color("#9CA3AF")).
@@ -463,21 +482,15 @@ func (m *App) renderInfoBar() string {
 	if m.searchQuery != "" {
 		left += fmt.Sprintf("  │  filtre: %q", m.searchQuery)
 	}
-
-	right := "runar v0.1.0"
-
-	rightRendered := rightStyle.Render(right)
-	rightWidth := lipgloss.Width(rightRendered)
-	leftWidth := m.width - rightWidth
-	if leftWidth < 1 {
-		leftWidth = 1
+	right := rightStyle.Render("runar v0.1.0")
+	rightW := lipgloss.Width(right)
+	leftW := m.width - rightW
+	if leftW < 1 {
+		leftW = 1
 	}
-
-	leftRendered := baseStyle.Width(leftWidth).Render(left)
-	return lipgloss.JoinHorizontal(lipgloss.Top, leftRendered, rightRendered)
+	return lipgloss.JoinHorizontal(lipgloss.Top, baseStyle.Width(leftW).Render(left), right)
 }
 
-// renderToast rend le toast courant.
 func (m *App) renderToast() string {
 	if m.toast == nil {
 		return ""
@@ -494,8 +507,7 @@ func (m *App) renderToast() string {
 	}
 }
 
-// max retourne le maximum de deux entiers.
-func max(a, b int) int {
+func maxInt(a, b int) int {
 	if a > b {
 		return a
 	}
