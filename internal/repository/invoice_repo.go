@@ -57,6 +57,12 @@ type invoiceRow struct {
 	PDFPath             sql.NullString `db:"pdf_path"`
 	CreatedAt           time.Time      `db:"created_at"`
 	UpdatedAt           time.Time      `db:"updated_at"`
+	// Colonnes migration 003 (e-facturation 2027)
+	EInvoiceFormat   sql.NullString `db:"e_invoice_format"`
+	EInvoiceXML      sql.NullString `db:"e_invoice_xml"`
+	EInvoiceSentAt   sql.NullTime   `db:"e_invoice_sent_at"`
+	EInvoicePDPRef   sql.NullString `db:"e_invoice_pdp_ref"`
+	VATPaymentOption sql.NullString `db:"vat_payment_option"`
 }
 
 func (r invoiceRow) toDomain() domain.Invoice {

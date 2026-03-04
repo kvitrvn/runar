@@ -41,7 +41,7 @@ AutoGest est une application TUI (Text User Interface) en Go inspirée de k9s, c
 ## 📁 Structure du Projet
 
 ```
-autogest/
+runar/
 ├── CLAUDE.md                    # Ce fichier - Vision et directives
 ├── LEGAL.md                     # Règles légales détaillées
 ├── ARCHITECTURE.md              # Architecture technique
@@ -49,7 +49,7 @@ autogest/
 ├── API.md                      # Documentation API interne
 ├── ROADMAP.md                  # Plan de développement
 ├── cmd/
-│   └── autogest/
+│   └── runar/
 │       └── main.go
 ├── internal/
 │   ├── tui/                    # Interface Bubbletea

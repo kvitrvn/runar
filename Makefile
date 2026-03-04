@@ -1,7 +1,11 @@
-BINARY_NAME=autogest
+BINARY_NAME=runar
 BINARY_DIR=./bin
-CMD_DIR=./cmd/autogest
+CMD_DIR=./cmd/runar
 MODULE=github.com/kvitrvn/runar
+
+# Supprime les warnings C de go-sqlite3 (-Wdiscarded-qualifiers)
+export CGO_CFLAGS := -Wno-discarded-qualifiers
+export CGO_ENABLED := 1
 
 .PHONY: all build run test test-legal test-coverage lint clean install help
 
@@ -11,23 +15,23 @@ all: build
 build:
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BINARY_DIR)
-	CGO_ENABLED=1 go build -o $(BINARY_DIR)/$(BINARY_NAME) $(CMD_DIR)
+	go build -o $(BINARY_DIR)/$(BINARY_NAME) $(CMD_DIR)
 
 ## run: Lance l'application en mode dev
 run:
-	CGO_ENABLED=1 go run $(CMD_DIR)/main.go
+	go run $(CMD_DIR)/main.go
 
 ## test: Lance tous les tests
 test:
-	CGO_ENABLED=1 go test ./... -v
+	go test ./... -v
 
 ## test-legal: Lance uniquement les tests des règles légales
 test-legal:
-	CGO_ENABLED=1 go test ./internal/domain/... ./internal/service/... -v -run "Legal|Immut|Number|Validation"
+	go test ./internal/domain/... ./internal/service/... -v -run "Legal|Immut|Number|Validation"
 
 ## test-coverage: Lance les tests avec rapport de couverture
 test-coverage:
-	CGO_ENABLED=1 go test ./... -coverprofile=coverage.out
+	go test ./... -coverprofile=coverage.out
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
 

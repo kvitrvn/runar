@@ -22,7 +22,7 @@ AutoGest suit une architecture en couches (Layered Architecture) avec séparatio
 
 ## 🗂️ Structure Détaillée des Packages
 
-### `/cmd/autogest`
+### `/cmd/runar`
 
 **Responsabilité** : Point d'entrée de l'application
 
@@ -35,10 +35,10 @@ import (
     "os"
     
     tea "github.com/charmbracelet/bubbletea"
-    "github.com/yourname/autogest/internal/config"
-    "github.com/yourname/autogest/internal/repository"
-    "github.com/yourname/autogest/internal/service"
-    "github.com/yourname/autogest/internal/tui"
+    "github.com/yourname/runar/internal/config"
+    "github.com/yourname/runar/internal/repository"
+    "github.com/yourname/runar/internal/service"
+    "github.com/yourname/runar/internal/tui"
 )
 
 func main() {
@@ -553,8 +553,8 @@ import (
     "time"
     
     "github.com/shopspring/decimal"
-    "github.com/yourname/autogest/internal/domain"
-    "github.com/yourname/autogest/internal/repository"
+    "github.com/yourname/runar/internal/domain"
+    "github.com/yourname/runar/internal/repository"
 )
 
 type InvoiceService struct {
@@ -755,7 +755,7 @@ package repository
 import (
     "database/sql"
     "github.com/jmoiron/sqlx"
-    "github.com/yourname/autogest/internal/domain"
+    "github.com/yourname/runar/internal/domain"
 )
 
 type InvoiceRepository interface {
@@ -855,9 +855,9 @@ package tui
 
 import (
     "github.com/charmbracelet/bubbletea"
-    "github.com/yourname/autogest/internal/config"
-    "github.com/yourname/autogest/internal/service"
-    "github.com/yourname/autogest/internal/tui/views"
+    "github.com/yourname/runar/internal/config"
+    "github.com/yourname/runar/internal/service"
+    "github.com/yourname/runar/internal/tui/views"
 )
 
 // ViewType représente le type de vue active

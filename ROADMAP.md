@@ -24,7 +24,7 @@ Phase 4: Polish (S7)            ░░░░░░░░░░░░░░░░
 
 - [ ] **Setup Projet Go**
   ```bash
-  go mod init github.com/yourname/autogest
+  go mod init github.com/yourname/runar
   go get github.com/charmbracelet/bubbletea@latest
   go get github.com/mattn/go-sqlite3@latest
   go get github.com/shopspring/decimal@latest
@@ -304,7 +304,7 @@ Phase 4: Polish (S7)            ░░░░░░░░░░░░░░░░
       recovery_fee: 40
     
     database:
-      path: "./autogest.db"
+      path: "./runar.db"
     
     pdf:
       output_dir: "./invoices"
