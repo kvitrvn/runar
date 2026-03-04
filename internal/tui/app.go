@@ -155,7 +155,8 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 
-	case views.InvoicesLoadedMsg, views.InvoiceSavedMsg, views.InvoicePaidMsg, views.InvoiceDeletedMsg:
+	case views.InvoicesLoadedMsg, views.InvoiceSavedMsg, views.InvoicePaidMsg, views.InvoiceDeletedMsg,
+		views.InvoiceIssuedMsg, views.InvoiceSentMsg:
 		var cmd tea.Cmd
 		m.invoicesView, cmd = m.invoicesView.Update(msg)
 		cmds = append(cmds, cmd)
@@ -175,7 +176,7 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case views.OpenCreditNoteFormMsg:
 		m.currentView = ViewCreditNotes
 		m.creditNotesView.OpenFormForInvoice(msg.InvoiceID, msg.InvoiceNumber)
-		return m, nil
+		return m, m.creditNotesView.Load()
 
 	case views.CreditNotesLoadedMsg, views.CreditNoteSavedMsg, views.CreditNotePDFMsg:
 		var cmd tea.Cmd
@@ -190,6 +191,9 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case views.QuoteConvertedMsg:
+		var cmd tea.Cmd
+		m.quotesView, cmd = m.quotesView.Update(msg)
+		cmds = append(cmds, cmd)
 		if msg.Err != nil {
 			m.showToast("Conversion échouée : "+msg.Err.Error(), ToastError)
 		} else {
@@ -236,8 +240,16 @@ func (m *App) isActiveViewInputBusy() bool {
 
 // isViewInSubMode retourne true si la vue active est dans un sous-mode (detail, form…).
 func (m *App) isViewInSubMode() bool {
-	// Pour l'instant on ne peut pas interroger le mode interne des vues directement,
-	// donc on considère qu'on peut quitter si l'input n'est pas actif.
+	switch m.currentView {
+	case ViewClients:
+		return m.clientsView.IsInSubMode()
+	case ViewInvoices:
+		return m.invoicesView.IsInSubMode()
+	case ViewCreditNotes:
+		return m.creditNotesView.IsInSubMode()
+	case ViewQuotes:
+		return m.quotesView.IsInSubMode()
+	}
 	return false
 }
 

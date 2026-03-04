@@ -126,6 +126,59 @@ func (s *InvoiceService) Update(id int, updates *domain.Invoice) error {
 	return nil
 }
 
+// MarkAsIssued émet une facture brouillon (draft → issued).
+func (s *InvoiceService) MarkAsIssued(id int) error {
+	invoice, err := s.invoiceRepo.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if invoice.State != domain.InvoiceStateDraft {
+		return fmt.Errorf("seule une facture brouillon peut être émise (état: %s)", invoice.State)
+	}
+	prev := string(invoice.State)
+	invoice.State = domain.InvoiceStateIssued
+	if err := s.invoiceRepo.Update(id, invoice); err != nil {
+		return err
+	}
+	s.audit.Log("invoice", id, domain.AuditActionUpdated, prev, string(domain.InvoiceStateIssued))
+	return nil
+}
+
+// MarkAsSent marque une facture comme envoyée (draft/issued → sent).
+func (s *InvoiceService) MarkAsSent(id int) error {
+	invoice, err := s.invoiceRepo.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if invoice.State != domain.InvoiceStateDraft && invoice.State != domain.InvoiceStateIssued {
+		return fmt.Errorf("seule une facture brouillon ou émise peut être envoyée (état: %s)", invoice.State)
+	}
+	prev := string(invoice.State)
+	invoice.State = domain.InvoiceStateSent
+	if err := s.invoiceRepo.Update(id, invoice); err != nil {
+		return err
+	}
+	s.audit.Log("invoice", id, domain.AuditActionUpdated, prev, string(domain.InvoiceStateSent))
+	return nil
+}
+
+// Delete supprime définitivement un brouillon.
+// LEGAL: Seul un brouillon (jamais émis) peut être supprimé.
+func (s *InvoiceService) Delete(id int) error {
+	invoice, err := s.invoiceRepo.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if !invoice.CanDelete() {
+		return fmt.Errorf("seul un brouillon peut être supprimé (état: %s)", invoice.State)
+	}
+	if err := s.invoiceRepo.SoftDelete(id); err != nil {
+		return err
+	}
+	s.audit.Log("invoice", id, domain.AuditActionUpdated, string(invoice.State), "deleted")
+	return nil
+}
+
 // MarkAsPaid marque une facture comme payée et la VERROUILLE définitivement.
 // LEGAL: Après cet appel, la facture devient IMMUABLE (Art. L441-9 Code de Commerce).
 func (s *InvoiceService) MarkAsPaid(id int, paidDate time.Time) error {

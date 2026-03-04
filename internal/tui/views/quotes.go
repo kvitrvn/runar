@@ -156,15 +156,22 @@ func (v QuotesView) Load(search string) tea.Cmd {
 	}
 }
 
-// SetSize ajuste les dimensions.
+// SetSize ajuste les dimensions et recalcule les colonnes.
 func (v *QuotesView) SetSize(w, h int) {
 	v.width = w
 	v.height = h
+	v.table.SetColumns(quoteColumns(w))
+	v.table.SetHeight(h - 6)
 }
 
 // IsInputActive retourne true si un formulaire est actif.
 func (v QuotesView) IsInputActive() bool {
 	return v.mode == QuoteModeForm
+}
+
+// IsInSubMode retourne true si la vue n'est pas en mode liste.
+func (v QuotesView) IsInSubMode() bool {
+	return v.mode != QuoteModeList
 }
 
 // Update gère les messages.
@@ -206,7 +213,9 @@ func (v QuotesView) Update(msg tea.Msg) (QuotesView, tea.Cmd) {
 		}
 
 	case QuoteConvertedMsg:
-		// Géré par l'App (toast + switch view)
+		// Réinitialiser le mode (l'App gère toast + switch view)
+		v.mode = QuoteModeList
+		v.selected = nil
 
 	case tea.KeyMsg:
 		switch v.mode {
@@ -675,9 +684,11 @@ func (v QuotesView) renderConfirmConvert() string {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func quoteColumns(width int) []table.Column {
+	// Colonnes fixes : ID(5)+TOTAL TTC(12)+ÉTAT(12)+ÉMISSION(12)+EXPIRATION(12) = 53 + 6*2 = 65
+	numW := max(13, width-65)
 	return []table.Column{
 		{Title: "ID", Width: 5},
-		{Title: "NUMÉRO", Width: 14},
+		{Title: "NUMÉRO", Width: numW},
 		{Title: "TOTAL TTC", Width: 12},
 		{Title: "ÉTAT", Width: 12},
 		{Title: "ÉMISSION", Width: 12},
@@ -696,7 +707,7 @@ func quoteRows(quotes []domain.Quote) []table.Row {
 			fmt.Sprint(q.ID),
 			q.Number,
 			q.TotalTTC.StringFixed(2) + "€",
-			string(q.State),
+			quoteStatePlain(q),
 			q.IssueDate.Format("02/01/2006"),
 			expiry,
 		}
@@ -717,6 +728,26 @@ func filterQuotes(quotes []domain.Quote, search string) []domain.Quote {
 		}
 	}
 	return out
+}
+
+// quoteStatePlain retourne le nom d'état en français sans ANSI (pour tableau).
+func quoteStatePlain(q domain.Quote) string {
+	if q.IsExpired() && q.State != domain.QuoteStateAccepted && q.State != domain.QuoteStateRefused {
+		return "expiré"
+	}
+	switch q.State {
+	case domain.QuoteStateDraft:
+		return "brouillon"
+	case domain.QuoteStateSent:
+		return "envoyé"
+	case domain.QuoteStateAccepted:
+		return "accepté"
+	case domain.QuoteStateRefused:
+		return "refusé"
+	case domain.QuoteStateExpired:
+		return "expiré"
+	}
+	return string(q.State)
 }
 
 func renderQuoteState(state domain.QuoteState) string {

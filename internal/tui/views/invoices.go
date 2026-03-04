@@ -33,6 +33,8 @@ type InvoicesLoadedMsg struct{ Invoices []domain.Invoice; Err error }
 type InvoiceSavedMsg struct{ Err error }
 type InvoicePaidMsg struct{ Err error }
 type InvoiceDeletedMsg struct{ Err error }
+type InvoiceIssuedMsg struct{ Err error }
+type InvoiceSentMsg struct{ Err error }
 type InvoicePDFMsg struct{ Path string; Err error }
 type OpenCreditNoteFormMsg struct{ InvoiceID int; InvoiceNumber string }
 
@@ -184,10 +186,17 @@ func (v InvoicesView) Load(search string) tea.Cmd {
 	}
 }
 
-// SetSize ajuste les dimensions.
+// SetSize ajuste les dimensions et recalcule les colonnes.
 func (v *InvoicesView) SetSize(w, h int) {
 	v.width = w
 	v.height = h
+	v.table.SetColumns(invoiceColumns(w))
+	v.table.SetHeight(h - 6)
+}
+
+// IsInSubMode retourne true si la vue n'est pas en mode liste.
+func (v InvoicesView) IsInSubMode() bool {
+	return v.mode != InvoiceModeList
 }
 
 // IsInputActive retourne true si un formulaire est actif.
@@ -238,6 +247,22 @@ func (v InvoicesView) Update(msg tea.Msg) (InvoicesView, tea.Cmd) {
 			return v, v.Load(v.search)
 		}
 
+	case InvoiceIssuedMsg:
+		if msg.Err != nil {
+			v.err = msg.Err.Error()
+		} else {
+			v.err = ""
+			return v, v.Load(v.search)
+		}
+
+	case InvoiceSentMsg:
+		if msg.Err != nil {
+			v.err = msg.Err.Error()
+		} else {
+			v.err = ""
+			return v, v.Load(v.search)
+		}
+
 	case InvoicePDFMsg:
 		if msg.Err != nil {
 			v.err = msg.Err.Error()
@@ -275,15 +300,20 @@ func (v InvoicesView) handleListKey(msg tea.KeyMsg) (InvoicesView, tea.Cmd) {
 		v.mode = InvoiceModeForm
 		v.form = newInvoiceForm(v.config, v.width)
 		v.formErr = ""
-	case "e":
+	case "i":
 		sel := v.selectedInvoice()
 		if sel != nil {
-			if !sel.CanEdit() {
-				v.err = styles.RenderImmutableError(sel.Number)
-			} else {
-				// TODO Sprint 5: formulaire édition
-				v.err = "Édition via formulaire — Sprint 5"
-			}
+			return v, v.markAsIssued(sel.ID)
+		}
+	case "s":
+		sel := v.selectedInvoice()
+		if sel != nil {
+			return v, v.markAsSent(sel.ID)
+		}
+	case "e":
+		sel := v.selectedInvoice()
+		if sel != nil && !sel.CanEdit() {
+			v.err = styles.RenderImmutableError(sel.Number)
 		}
 	case "m":
 		sel := v.selectedInvoice()
@@ -422,6 +452,14 @@ func (v InvoicesView) handleDetailKey(msg tea.KeyMsg) (InvoicesView, tea.Cmd) {
 		v.mode = InvoiceModeList
 		v.selected = nil
 		v.err = ""
+	case "i":
+		if v.selected != nil {
+			return v, v.markAsIssued(v.selected.ID)
+		}
+	case "s":
+		if v.selected != nil {
+			return v, v.markAsSent(v.selected.ID)
+		}
 	case "m":
 		if v.selected != nil && v.selected.CanMarkAsPaid() {
 			v.mode = InvoiceModeConfirmPaid
@@ -502,11 +540,28 @@ func (v InvoicesView) markAsPaid(id int) tea.Cmd {
 	}
 }
 
-// deleteInvoice retourne une erreur : la suppression n'est pas encore implémentée (Sprint 5).
-// LEGAL: seuls les brouillons peuvent être supprimés.
-func (v InvoicesView) deleteInvoice(_ int) tea.Cmd {
+// markAsIssued émet une facture brouillon.
+func (v InvoicesView) markAsIssued(id int) tea.Cmd {
+	svc := v.services.Invoice
 	return func() tea.Msg {
-		return InvoiceDeletedMsg{Err: fmt.Errorf("suppression brouillon : non implémentée (Sprint 5)")}
+		return InvoiceIssuedMsg{Err: svc.MarkAsIssued(id)}
+	}
+}
+
+// markAsSent marque une facture comme envoyée.
+func (v InvoicesView) markAsSent(id int) tea.Cmd {
+	svc := v.services.Invoice
+	return func() tea.Msg {
+		return InvoiceSentMsg{Err: svc.MarkAsSent(id)}
+	}
+}
+
+// deleteInvoice supprime un brouillon.
+// LEGAL: seuls les brouillons peuvent être supprimés.
+func (v InvoicesView) deleteInvoice(id int) tea.Cmd {
+	svc := v.services.Invoice
+	return func() tea.Msg {
+		return InvoiceDeletedMsg{Err: svc.Delete(id)}
 	}
 }
 
@@ -563,7 +618,7 @@ func (v InvoicesView) renderList() string {
 	sb.WriteString(v.table.View() + "\n")
 
 	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(
-		"  n: Nouvelle  m: Marquer payée  c: Avoir  p: PDF  d: Supprimer (brouillon)  Enter: Détail  j/k: Nav",
+		"  n: Nouvelle  i: Émettre  s: Envoyer  m: Payée  c: Avoir  p: PDF  d: Supprimer  Enter: Détail  j/k: Nav",
 	)
 	sb.WriteString(hint)
 	return sb.String()
@@ -744,14 +799,24 @@ func (v InvoicesView) renderDetail() string {
 		inv.RecoveryFee.StringFixed(0),
 	)))
 
+	// PDFPath
+	if inv.PDFPath != "" {
+		content.WriteString(styles.StyleSuccess.Render("  PDF : "+inv.PDFPath) + "\n")
+	}
+
 	// Actions disponibles
 	content.WriteString("\n")
 	var actions []string
+	if inv.State == domain.InvoiceStateDraft {
+		actions = append(actions, "i: Émettre", "s: Envoyer")
+	} else if inv.State == domain.InvoiceStateIssued {
+		actions = append(actions, "s: Envoyer")
+	}
 	if inv.CanMarkAsPaid() {
-		actions = append(actions, "m: Marquer payée")
+		actions = append(actions, "m: Payée")
 	}
 	if inv.CanCancel() {
-		actions = append(actions, "c: Créer avoir")
+		actions = append(actions, "c: Avoir")
 	}
 	actions = append(actions, "p: PDF")
 	actions = append(actions, "Esc: Retour")
@@ -800,10 +865,12 @@ func (v InvoicesView) renderConfirmDelete() string {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 func invoiceColumns(width int) []table.Column {
+	// Colonnes fixes : ID(5)+NUMÉRO(12)+MONTANT TTC(13)+ÉTAT(14)+ÉCHÉANCE(12) = 56 + 6*2 padding = 68
+	clientW := max(16, width-68)
 	return []table.Column{
 		{Title: "ID", Width: 5},
 		{Title: "NUMÉRO", Width: 12},
-		{Title: "CLIENT", Width: 20},
+		{Title: "CLIENT", Width: clientW},
 		{Title: "MONTANT TTC", Width: 13},
 		{Title: "ÉTAT", Width: 14},
 		{Title: "ÉCHÉANCE", Width: 12},

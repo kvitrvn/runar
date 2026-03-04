@@ -73,15 +73,22 @@ func (v *CreditNotesView) OpenFormForInvoice(invoiceID int, invoiceNumber string
 	v.err = ""
 }
 
-// SetSize ajuste les dimensions.
+// SetSize ajuste les dimensions et recalcule les colonnes.
 func (v *CreditNotesView) SetSize(w, h int) {
 	v.width = w
 	v.height = h
+	v.table.SetColumns(cnColumns(w))
+	v.table.SetHeight(h - 6)
 }
 
 // IsInputActive retourne true si le formulaire est actif.
 func (v CreditNotesView) IsInputActive() bool {
 	return v.mode == CreditNoteModeForm
+}
+
+// IsInSubMode retourne true si la vue n'est pas en mode liste.
+func (v CreditNotesView) IsInSubMode() bool {
+	return v.mode != CreditNoteModeList
 }
 
 // Update gère les messages.
@@ -287,11 +294,13 @@ func (v CreditNotesView) renderDetail() string {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 func cnColumns(width int) []table.Column {
+	// Colonnes fixes : ID(5)+NUMÉRO(14)+FACTURE D'ORIGINE(18)+TOTAL TTC(12)+DATE(12) = 61 + 6*2 = 73
+	motifW := max(18, width-73)
 	return []table.Column{
 		{Title: "ID", Width: 5},
 		{Title: "NUMÉRO", Width: 14},
 		{Title: "FACTURE D'ORIGINE", Width: 18},
-		{Title: "MOTIF", Width: max(20, width-70)},
+		{Title: "MOTIF", Width: motifW},
 		{Title: "TOTAL TTC", Width: 12},
 		{Title: "DATE", Width: 12},
 	}

@@ -35,12 +35,35 @@ var globalBindings = []KeyBinding{
 // invoiceBindings liste les raccourcis spécifiques aux factures.
 var invoiceBindings = []KeyBinding{
 	{Key: "n", Description: "Nouvelle facture", Category: "Factures"},
-	{Key: "e", Description: "Éditer (si non payée)", Category: "Factures"},
-	{Key: "d", Description: "Supprimer (si brouillon)", Category: "Factures"},
+	{Key: "i", Description: "Émettre (brouillon → émise)", Category: "Factures"},
+	{Key: "s", Description: "Marquer envoyée (brouillon/émise → envoyée)", Category: "Factures"},
+	{Key: "m", Description: "Marquer comme payée (émise/envoyée)", Category: "Factures"},
+	{Key: "e", Description: "Éditer (si non payée / annulée)", Category: "Factures"},
+	{Key: "d", Description: "Supprimer (si brouillon uniquement)", Category: "Factures"},
 	{Key: "p", Description: "Générer PDF", Category: "Factures"},
-	{Key: "m", Description: "Marquer comme payée", Category: "Factures"},
-	{Key: "c", Description: "Créer avoir (si payée)", Category: "Factures"},
-	{Key: "Ctrl+d", Description: "Dupliquer", Category: "Factures"},
+	{Key: "c", Description: "Créer avoir (si émise / envoyée / payée)", Category: "Factures"},
+}
+
+// clientBindings liste les raccourcis spécifiques aux clients.
+var clientBindings = []KeyBinding{
+	{Key: "n", Description: "Nouveau client", Category: "Clients"},
+	{Key: "e", Description: "Éditer le client sélectionné", Category: "Clients"},
+	{Key: "d", Description: "Supprimer le client sélectionné", Category: "Clients"},
+}
+
+// quoteBindings liste les raccourcis spécifiques aux devis.
+var quoteBindings = []KeyBinding{
+	{Key: "n", Description: "Nouveau devis", Category: "Devis"},
+	{Key: "s", Description: "Marquer envoyé", Category: "Devis"},
+	{Key: "a", Description: "Accepter le devis", Category: "Devis"},
+	{Key: "r", Description: "Refuser le devis", Category: "Devis"},
+	{Key: "f", Description: "Convertir en facture (si accepté)", Category: "Devis"},
+	{Key: "p", Description: "Générer PDF", Category: "Devis"},
+}
+
+// creditNoteBindings liste les raccourcis spécifiques aux avoirs.
+var creditNoteBindings = []KeyBinding{
+	{Key: "p", Description: "Générer PDF", Category: "Avoirs"},
 }
 
 // RenderHelpPanel rend le panneau d'aide (overlay).
@@ -54,8 +77,11 @@ func RenderHelpPanel(width int) string {
 	sb.WriteString(styles.StyleTitle.Render("AIDE — Raccourcis Clavier") + "\n\n")
 
 	// Regrouper par catégorie
-	categoryOrder := []string{"Navigation", "Liste", "Factures"}
+	categoryOrder := []string{"Navigation", "Liste", "Factures", "Clients", "Devis", "Avoirs"}
 	allBindings := append(globalBindings, invoiceBindings...)
+	allBindings = append(allBindings, clientBindings...)
+	allBindings = append(allBindings, quoteBindings...)
+	allBindings = append(allBindings, creditNoteBindings...)
 	categories := make(map[string][]KeyBinding)
 	for _, kb := range allBindings {
 		categories[kb.Category] = append(categories[kb.Category], kb)

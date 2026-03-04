@@ -70,11 +70,18 @@ func (v ClientsView) Load(search string) tea.Cmd {
 func (v *ClientsView) SetSize(w, h int) {
 	v.width = w
 	v.height = h
+	v.table.SetColumns(clientColumns(w))
+	v.table.SetHeight(h - 6)
 }
 
 // IsInputActive retourne true si un formulaire est actif.
 func (v ClientsView) IsInputActive() bool {
 	return v.mode == ClientModeNew || v.mode == ClientModeEdit
+}
+
+// IsInSubMode retourne true si la vue n'est pas en mode liste.
+func (v ClientsView) IsInSubMode() bool {
+	return v.mode != ClientModeList
 }
 
 // Update gère les messages de la vue.
@@ -383,11 +390,13 @@ func (v ClientsView) renderConfirmDelete() string {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 func clientColumns(width int) []table.Column {
+	// Colonnes fixes : ID(5)+NOM(28)+SIRET(16)+VILLE(14) = 63 + 5*2 padding = 73
+	emailW := max(18, width-73)
 	return []table.Column{
 		{Title: "ID", Width: 5},
 		{Title: "NOM", Width: 28},
 		{Title: "SIRET", Width: 16},
-		{Title: "EMAIL", Width: max(20, width-80)},
+		{Title: "EMAIL", Width: emailW},
 		{Title: "VILLE", Width: 14},
 	}
 }
