@@ -34,13 +34,26 @@ type QuoteStateChangedMsg struct{ Err error }
 type QuoteConvertedMsg struct{ InvoiceNumber string; Err error }
 type QuoteDetailLoadedMsg struct{ Quote *domain.Quote; Err error }
 
+// OpenQuoteFormForClientMsg est envoyé depuis la vue clients pour créer un devis.
+type OpenQuoteFormForClientMsg struct {
+	ClientID   int
+	ClientName string
+}
+
+// quotePickerClientsMsg est envoyé quand les clients sont chargés pour le picker.
+type quotePickerClientsMsg struct {
+	Clients []domain.Client
+	Err     error
+}
+
 // ─── QuoteForm (formulaire multi-étapes) ─────────────────────────────────────
 
 type quoteFormStep int
 
 const (
-	quoteStepBasic quoteFormStep = iota
-	quoteStepLines
+	quoteStepClient quoteFormStep = iota // sélection client
+	quoteStepBasic                       // infos de base
+	quoteStepLines                       // lignes
 )
 
 type quoteLineEntry struct {
@@ -51,6 +64,9 @@ type quoteLineEntry struct {
 
 type quoteForm struct {
 	step        quoteFormStep
+	picker      clientPicker
+	clientID    int
+	clientName  string
 	basicForm   *components.Form
 	lineForm    *components.Form
 	lines       []quoteLineEntry
@@ -59,13 +75,35 @@ type quoteForm struct {
 }
 
 func newQuoteForm(cfg *config.Config, width int) *quoteForm {
-	basic := components.NewForm("NOUVEAU DEVIS — Informations", []components.FormField{
-		components.NewField("Client ID", "1", true),
+	return &quoteForm{
+		step:   quoteStepClient,
+		picker: newClientPicker(),
+		cfg:    cfg,
+	}
+}
+
+// buildQuoteBasicForm construit le formulaire d'infos de base (sans champ client).
+func buildQuoteBasicForm(width int, clientName string) *components.Form {
+	title := "NOUVEAU DEVIS — Informations"
+	if clientName != "" {
+		title += "  [" + clientName + "]"
+	}
+	return components.NewForm(title, []components.FormField{
 		components.NewField("Date émission", time.Now().Format("2006-01-02"), true),
 		components.NewField("Date expiration", time.Now().AddDate(0, 0, 30).Format("2006-01-02"), true),
 		components.NewField("Notes", "", false),
 	}, width)
-	return &quoteForm{step: quoteStepBasic, basicForm: basic, cfg: cfg}
+}
+
+// newQuoteFormForClient ouvre directement l'étape infos (client pré-rempli).
+func newQuoteFormForClient(cfg *config.Config, width int, clientID int, clientName string) *quoteForm {
+	return &quoteForm{
+		step:       quoteStepBasic,
+		clientID:   clientID,
+		clientName: clientName,
+		basicForm:  buildQuoteBasicForm(width, clientName),
+		cfg:        cfg,
+	}
 }
 
 func newQuoteLineForm(width int) *components.Form {
@@ -78,23 +116,24 @@ func newQuoteLineForm(width int) *components.Form {
 
 func (f *quoteForm) buildQuote() (*domain.Quote, error) {
 	bf := f.basicForm
-	var clientID int
-	fmt.Sscanf(bf.Value(0), "%d", &clientID)
+	if f.clientID == 0 {
+		return nil, fmt.Errorf("aucun client sélectionné")
+	}
 
-	issueDate, err := time.Parse("2006-01-02", bf.Value(1))
+	issueDate, err := time.Parse("2006-01-02", bf.Value(0))
 	if err != nil {
 		return nil, fmt.Errorf("date émission invalide (format attendu: AAAA-MM-JJ)")
 	}
-	expiryDate, err := time.Parse("2006-01-02", bf.Value(2))
+	expiryDate, err := time.Parse("2006-01-02", bf.Value(1))
 	if err != nil {
 		return nil, fmt.Errorf("date expiration invalide (format attendu: AAAA-MM-JJ)")
 	}
 
 	q := &domain.Quote{
-		ClientID:   clientID,
+		ClientID:   f.clientID,
 		IssueDate:  issueDate,
 		ExpiryDate: expiryDate,
-		Notes:      bf.Value(3),
+		Notes:      bf.Value(2),
 	}
 
 	for i, le := range f.lines {
@@ -146,6 +185,13 @@ func NewQuotesView(services *service.Services, cfg *config.Config, width, height
 		width:    width,
 		height:   height,
 	}
+}
+
+// OpenFormForClient ouvre le formulaire avec un client pré-sélectionné.
+func (v *QuotesView) OpenFormForClient(clientID int, clientName string) {
+	v.mode = QuoteModeForm
+	v.form = newQuoteFormForClient(v.config, v.width, clientID, clientName)
+	v.formErr = ""
 }
 
 // Load déclenche le chargement des devis.
@@ -227,6 +273,13 @@ func (v QuotesView) Update(msg tea.Msg) (QuotesView, tea.Cmd) {
 			v.err = ""
 		}
 
+	case quotePickerClientsMsg:
+		if msg.Err != nil {
+			v.formErr = msg.Err.Error()
+		} else if v.form != nil {
+			v.form.picker.SetClients(msg.Clients)
+		}
+
 	case tea.KeyMsg:
 		switch v.mode {
 		case QuoteModeList:
@@ -245,6 +298,13 @@ func (v QuotesView) Update(msg tea.Msg) (QuotesView, tea.Cmd) {
 		v.table = updated
 		return v, cmd
 	}
+
+	// Passer les messages non-clé au picker (ex: blink curseur textinput)
+	if v.mode == QuoteModeForm && v.form != nil && v.form.step == quoteStepClient {
+		_, cmd := v.form.picker.Update(msg)
+		return v, cmd
+	}
+
 	return v, nil
 }
 
@@ -254,6 +314,11 @@ func (v QuotesView) handleListKey(msg tea.KeyMsg) (QuotesView, tea.Cmd) {
 		v.mode = QuoteModeForm
 		v.form = newQuoteForm(v.config, v.width)
 		v.formErr = ""
+		svc := v.services.Client
+		return v, func() tea.Msg {
+			clients, err := svc.List("")
+			return quotePickerClientsMsg{Clients: clients, Err: err}
+		}
 	case "s":
 		if sel := v.selectedQuote(); sel != nil {
 			return v, v.changeState(sel.ID, "sent")
@@ -300,6 +365,26 @@ func (v QuotesView) handleListKey(msg tea.KeyMsg) (QuotesView, tea.Cmd) {
 func (v QuotesView) handleFormKey(msg tea.KeyMsg) (QuotesView, tea.Cmd) {
 	if v.form == nil {
 		return v, nil
+	}
+
+	// Étape 0 : sélection du client via picker
+	if v.form.step == quoteStepClient {
+		evt, cmd := v.form.picker.Update(msg)
+		switch evt {
+		case pickerCancelled:
+			v.mode = QuoteModeList
+			v.form = nil
+			v.formErr = ""
+		case pickerSelected:
+			if sel := v.form.picker.Selected(); sel != nil {
+				v.form.clientID = sel.ID
+				v.form.clientName = sel.Name
+				v.form.step = quoteStepBasic
+				v.form.basicForm = buildQuoteBasicForm(v.width, sel.Name)
+				v.formErr = ""
+			}
+		}
+		return v, cmd
 	}
 
 	if v.form.step == quoteStepBasic {
@@ -524,6 +609,17 @@ func (v QuotesView) renderForm() string {
 	if v.form == nil {
 		return ""
 	}
+
+	// Étape 0 : sélection du client
+	if v.form.step == quoteStepClient {
+		var sb strings.Builder
+		if v.formErr != "" {
+			sb.WriteString(styles.StyleDanger.Render("⚠ "+v.formErr) + "\n\n")
+		}
+		sb.WriteString(v.form.picker.View(v.width))
+		return sb.String()
+	}
+
 	var sb strings.Builder
 	if v.formErr != "" {
 		sb.WriteString(styles.StyleDanger.Render("⚠ "+v.formErr) + "\n\n")
@@ -690,12 +786,16 @@ func (v QuotesView) renderConfirmConvert() string {
 		return ""
 	}
 	q := v.selected
+	clientLabel := fmt.Sprint(q.ClientID)
+	if q.Client != nil {
+		clientLabel = q.Client.Name
+	}
 	msg := fmt.Sprintf("Convertir le devis %s en FACTURE ?\n\n"+
-		"  Client ID  : %d\n"+
+		"  Client     : %s\n"+
 		"  Total HT   : %s€\n"+
 		"  Total TTC  : %s€\n\n"+
 		"  Une nouvelle facture brouillon sera créée.",
-		q.Number, q.ClientID, q.TotalHT.StringFixed(2), q.TotalTTC.StringFixed(2))
+		q.Number, clientLabel, q.TotalHT.StringFixed(2), q.TotalTTC.StringFixed(2))
 	return "\n" + lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#8B5CF6")).
 		Bold(true).
@@ -711,11 +811,13 @@ func (v QuotesView) renderConfirmConvert() string {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func quoteColumns(width int) []table.Column {
-	// Colonnes fixes : ID(5)+TOTAL TTC(12)+ÉTAT(12)+ÉMISSION(12)+EXPIRATION(12) = 53 + 6*2 = 65
-	numW := max(13, width-65)
+	// Colonnes fixes : ID(5)+NUMÉRO(14)+TTC(12)+ÉTAT(12)+ÉMISSION(12)+EXPIRATION(12) = 67 + 7*2 = 81
+	// CLIENT remplit l'espace restant
+	clientW := max(14, width-81)
 	return []table.Column{
 		{Title: "ID", Width: 5},
-		{Title: "NUMÉRO", Width: numW},
+		{Title: "NUMÉRO", Width: 14},
+		{Title: "CLIENT", Width: clientW},
 		{Title: "TOTAL TTC", Width: 12},
 		{Title: "ÉTAT", Width: 12},
 		{Title: "ÉMISSION", Width: 12},
@@ -726,16 +828,21 @@ func quoteColumns(width int) []table.Column {
 func quoteRows(quotes []domain.Quote) []table.Row {
 	rows := make([]table.Row, len(quotes))
 	for i, q := range quotes {
-		expiry := q.ExpiryDate.Format("02/01/2006")
+		expiry := q.ExpiryDate.Format("02/01/06")
 		if q.IsExpired() && q.State != domain.QuoteStateAccepted && q.State != domain.QuoteStateRefused {
 			expiry = "! " + expiry
+		}
+		clientName := fmt.Sprint(q.ClientID)
+		if q.Client != nil {
+			clientName = q.Client.Name
 		}
 		rows[i] = table.Row{
 			fmt.Sprint(q.ID),
 			q.Number,
+			clientName,
 			q.TotalTTC.StringFixed(2) + "€",
 			quoteStatePlain(q),
-			q.IssueDate.Format("02/01/2006"),
+			q.IssueDate.Format("02/01/06"),
 			expiry,
 		}
 	}
@@ -749,8 +856,13 @@ func filterQuotes(quotes []domain.Quote, search string) []domain.Quote {
 	s := strings.ToLower(search)
 	var out []domain.Quote
 	for _, q := range quotes {
+		clientName := ""
+		if q.Client != nil {
+			clientName = strings.ToLower(q.Client.Name)
+		}
 		if strings.Contains(strings.ToLower(q.Number), s) ||
-			strings.Contains(strings.ToLower(string(q.State)), s) {
+			strings.Contains(strings.ToLower(string(q.State)), s) ||
+			strings.Contains(clientName, s) {
 			out = append(out, q)
 		}
 	}

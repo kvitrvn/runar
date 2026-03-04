@@ -65,6 +65,8 @@ type invoiceRow struct {
 	VATPaymentOption sql.NullString `db:"vat_payment_option"`
 	// Colonnes migration 004 (libellé virement)
 	PaymentRef string `db:"payment_ref"`
+	// Chargé par LEFT JOIN dans List() uniquement
+	ClientName sql.NullString `db:"client_name"`
 }
 
 func (r invoiceRow) toDomain() domain.Invoice {
@@ -113,6 +115,9 @@ func (r invoiceRow) toDomain() domain.Invoice {
 	inv.LatePenaltyRate, _ = decimal.NewFromString(r.LatePenaltyRate)
 	inv.RecoveryFee, _ = decimal.NewFromString(r.RecoveryFee)
 	inv.PaymentRef = r.PaymentRef
+	if r.ClientName.Valid && r.ClientName.String != "" {
+		inv.Client = &domain.Client{Name: r.ClientName.String}
+	}
 	return inv
 }
 
@@ -315,26 +320,30 @@ func (r *invoiceRepository) getLines(invoiceID int) ([]domain.InvoiceLine, error
 }
 
 func (r *invoiceRepository) List(filters InvoiceFilters) ([]domain.Invoice, error) {
-	query := "SELECT * FROM invoices WHERE 1=1"
+	query := `
+		SELECT invoices.*, clients.name AS client_name
+		FROM invoices
+		LEFT JOIN clients ON invoices.client_id = clients.id
+		WHERE 1=1`
 	args := []interface{}{}
 
 	if filters.State != "" {
-		query += " AND state = ?"
+		query += " AND invoices.state = ?"
 		args = append(args, filters.State)
 	}
 	if filters.ClientID > 0 {
-		query += " AND client_id = ?"
+		query += " AND invoices.client_id = ?"
 		args = append(args, filters.ClientID)
 	}
 	if filters.Year > 0 {
-		query += " AND strftime('%Y', issue_date) = ?"
+		query += " AND strftime('%Y', invoices.issue_date) = ?"
 		args = append(args, fmt.Sprintf("%d", filters.Year))
 	}
 	if filters.Search != "" {
-		query += " AND number LIKE ?"
-		args = append(args, "%"+filters.Search+"%")
+		query += " AND (invoices.number LIKE ? OR clients.name LIKE ?)"
+		args = append(args, "%"+filters.Search+"%", "%"+filters.Search+"%")
 	}
-	query += " ORDER BY issue_date DESC, number DESC"
+	query += " ORDER BY invoices.issue_date DESC, invoices.number DESC"
 
 	var rows []invoiceRow
 	if err := r.db.Select(&rows, query, args...); err != nil {

@@ -32,19 +32,21 @@ type CreditNoteRepository interface {
 }
 
 type quoteRow struct {
-	ID         int       `db:"id"`
-	Number     string    `db:"number"`
-	ClientID   int       `db:"client_id"`
-	IssueDate  time.Time `db:"issue_date"`
-	ExpiryDate time.Time `db:"expiry_date"`
-	State      string    `db:"state"`
-	TotalHT    string    `db:"total_ht"`
-	TotalTTC   string    `db:"total_ttc"`
-	VATAmount  string    `db:"vat_amount"`
+	ID         int            `db:"id"`
+	Number     string         `db:"number"`
+	ClientID   int            `db:"client_id"`
+	IssueDate  time.Time      `db:"issue_date"`
+	ExpiryDate time.Time      `db:"expiry_date"`
+	State      string         `db:"state"`
+	TotalHT    string         `db:"total_ht"`
+	TotalTTC   string         `db:"total_ttc"`
+	VATAmount  string         `db:"vat_amount"`
 	Notes      sql.NullString `db:"notes"`
 	PDFPath    sql.NullString `db:"pdf_path"`
-	CreatedAt  time.Time `db:"created_at"`
-	UpdatedAt  time.Time `db:"updated_at"`
+	CreatedAt  time.Time      `db:"created_at"`
+	UpdatedAt  time.Time      `db:"updated_at"`
+	// Chargé par LEFT JOIN dans List() uniquement
+	ClientName sql.NullString `db:"client_name"`
 }
 
 type quoteRepository struct {
@@ -178,19 +180,24 @@ func (r *quoteRepository) GetByID(id int) (*domain.Quote, error) {
 }
 
 func (r *quoteRepository) List(search string) ([]domain.Quote, error) {
-	var rows []quoteRow
-	var err error
-	if search == "" {
-		err = r.db.Select(&rows, "SELECT * FROM quotes ORDER BY issue_date DESC")
-	} else {
-		err = r.db.Select(&rows, "SELECT * FROM quotes WHERE number LIKE ? ORDER BY issue_date DESC", "%"+search+"%")
+	query := `
+		SELECT quotes.*, clients.name AS client_name
+		FROM quotes
+		LEFT JOIN clients ON quotes.client_id = clients.id`
+	args := []interface{}{}
+	if search != "" {
+		query += " WHERE quotes.number LIKE ? OR clients.name LIKE ?"
+		args = append(args, "%"+search+"%", "%"+search+"%")
 	}
-	if err != nil {
+	query += " ORDER BY quotes.issue_date DESC"
+
+	var rows []quoteRow
+	if err := r.db.Select(&rows, query, args...); err != nil {
 		return nil, err
 	}
 	quotes := make([]domain.Quote, len(rows))
 	for i, row := range rows {
-		quotes[i] = domain.Quote{
+		q := domain.Quote{
 			ID:         row.ID,
 			Number:     row.Number,
 			ClientID:   row.ClientID,
@@ -198,8 +205,12 @@ func (r *quoteRepository) List(search string) ([]domain.Quote, error) {
 			ExpiryDate: row.ExpiryDate,
 			State:      domain.QuoteState(row.State),
 		}
-		quotes[i].TotalHT, _ = decimal.NewFromString(row.TotalHT)
-		quotes[i].TotalTTC, _ = decimal.NewFromString(row.TotalTTC)
+		q.TotalHT, _ = decimal.NewFromString(row.TotalHT)
+		q.TotalTTC, _ = decimal.NewFromString(row.TotalTTC)
+		if row.ClientName.Valid && row.ClientName.String != "" {
+			q.Client = &domain.Client{Name: row.ClientName.String}
+		}
+		quotes[i] = q
 	}
 	return quotes, nil
 }

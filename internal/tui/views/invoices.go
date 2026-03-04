@@ -50,9 +50,16 @@ type OpenCreditNoteFormMsg struct {
 type invoiceFormStep int
 
 const (
-	invoiceStepBasic invoiceFormStep = iota // infos de base
-	invoiceStepLines                        // lignes
+	invoiceStepClient invoiceFormStep = iota // sélection client
+	invoiceStepBasic                         // infos de base
+	invoiceStepLines                         // lignes
 )
+
+// invoicePickerClientsMsg est envoyé quand les clients sont chargés pour le picker.
+type invoicePickerClientsMsg struct {
+	Clients []domain.Client
+	Err     error
+}
 
 // lineEntry est une ligne de facture en cours de saisie.
 type lineEntry struct {
@@ -64,6 +71,9 @@ type lineEntry struct {
 // invoiceForm gère la saisie d'une nouvelle facture.
 type invoiceForm struct {
 	step        invoiceFormStep
+	picker      clientPicker
+	clientID    int
+	clientName  string
 	basicForm   *components.Form
 	lineForm    *components.Form
 	lines       []lineEntry
@@ -72,18 +82,35 @@ type invoiceForm struct {
 }
 
 func newInvoiceForm(cfg *config.Config, width int) *invoiceForm {
-	basic := components.NewForm("NOUVELLE FACTURE — Informations", []components.FormField{
-		components.NewField("Client ID", "1", true),
+	return &invoiceForm{
+		step:   invoiceStepClient,
+		picker: newClientPicker(),
+		cfg:    cfg,
+	}
+}
+
+// buildInvoiceBasicForm construit le formulaire d'infos de base (sans champ client).
+func buildInvoiceBasicForm(width int, clientName string) *components.Form {
+	title := "NOUVELLE FACTURE — Informations"
+	if clientName != "" {
+		title += "  [" + clientName + "]"
+	}
+	return components.NewForm(title, []components.FormField{
 		components.NewField("Date émission", time.Now().Format("2006-01-02"), true),
 		components.NewField("Date échéance", time.Now().AddDate(0, 0, 30).Format("2006-01-02"), true),
 		components.NewField("Date livraison", time.Now().Format("2006-01-02"), true),
 		components.NewField("Notes", "", false),
 	}, width)
+}
 
+// newInvoiceFormForClient ouvre directement l'étape infos (client pré-rempli).
+func newInvoiceFormForClient(cfg *config.Config, width int, clientID int, clientName string) *invoiceForm {
 	return &invoiceForm{
-		step:      invoiceStepBasic,
-		basicForm: basic,
-		cfg:       cfg,
+		step:       invoiceStepBasic,
+		clientID:   clientID,
+		clientName: clientName,
+		basicForm:  buildInvoiceBasicForm(width, clientName),
+		cfg:        cfg,
 	}
 }
 
@@ -98,29 +125,30 @@ func newLineForm(width int) *components.Form {
 // buildInvoice construit une domain.Invoice depuis le formulaire.
 func (f *invoiceForm) buildInvoice() (*domain.Invoice, error) {
 	bf := f.basicForm
-	var clientID int
-	fmt.Sscanf(bf.Value(0), "%d", &clientID)
+	if f.clientID == 0 {
+		return nil, fmt.Errorf("aucun client sélectionné")
+	}
 
-	issueDate, err := time.Parse("2006-01-02", bf.Value(1))
+	issueDate, err := time.Parse("2006-01-02", bf.Value(0))
 	if err != nil {
 		return nil, fmt.Errorf("date émission invalide (format attendu: AAAA-MM-JJ)")
 	}
-	dueDate, err := time.Parse("2006-01-02", bf.Value(2))
+	dueDate, err := time.Parse("2006-01-02", bf.Value(1))
 	if err != nil {
 		return nil, fmt.Errorf("date échéance invalide (format attendu: AAAA-MM-JJ)")
 	}
-	deliveryDate, err := time.Parse("2006-01-02", bf.Value(3))
+	deliveryDate, err := time.Parse("2006-01-02", bf.Value(2))
 	if err != nil {
 		return nil, fmt.Errorf("date livraison invalide (format attendu: AAAA-MM-JJ)")
 	}
 
 	inv := &domain.Invoice{
-		ClientID:         clientID,
+		ClientID:         f.clientID,
 		IssueDate:        issueDate,
 		DueDate:          dueDate,
 		DeliveryDate:     deliveryDate,
 		State:            domain.InvoiceStateDraft,
-		Notes:            bf.Value(4),
+		Notes:            bf.Value(3),
 		VATApplicable:    f.cfg.VAT.Applicable,
 		VATExemptionText: f.cfg.VAT.ExemptionText,
 		PaymentDeadline:  f.cfg.Payment.DefaultDeadline,
@@ -145,6 +173,12 @@ func (f *invoiceForm) buildInvoice() (*domain.Invoice, error) {
 	}
 
 	return inv, nil
+}
+
+// OpenInvoiceFormForClientMsg est envoyé depuis la vue clients pour créer une facture.
+type OpenInvoiceFormForClientMsg struct {
+	ClientID   int
+	ClientName string
 }
 
 // ─── InvoicesView ────────────────────────────────────────────────────────────
@@ -177,6 +211,13 @@ func NewInvoicesView(services *service.Services, cfg *config.Config, width, heig
 		width:    width,
 		height:   height,
 	}
+}
+
+// OpenFormForClient ouvre le formulaire avec un client pré-sélectionné.
+func (v *InvoicesView) OpenFormForClient(clientID int, clientName string) {
+	v.mode = InvoiceModeForm
+	v.form = newInvoiceFormForClient(v.config, v.width, clientID, clientName)
+	v.formErr = ""
 }
 
 // Load déclenche le chargement des factures.
@@ -285,6 +326,13 @@ func (v InvoicesView) Update(msg tea.Msg) (InvoicesView, tea.Cmd) {
 			v.err = ""
 		}
 
+	case invoicePickerClientsMsg:
+		if msg.Err != nil {
+			v.formErr = msg.Err.Error()
+		} else if v.form != nil {
+			v.form.picker.SetClients(msg.Clients)
+		}
+
 	case tea.KeyMsg:
 		switch v.mode {
 		case InvoiceModeList:
@@ -306,6 +354,12 @@ func (v InvoicesView) Update(msg tea.Msg) (InvoicesView, tea.Cmd) {
 		return v, cmd
 	}
 
+	// Passer les messages non-clé au picker (ex: blink curseur textinput)
+	if v.mode == InvoiceModeForm && v.form != nil && v.form.step == invoiceStepClient {
+		_, cmd := v.form.picker.Update(msg)
+		return v, cmd
+	}
+
 	return v, nil
 }
 
@@ -315,6 +369,11 @@ func (v InvoicesView) handleListKey(msg tea.KeyMsg) (InvoicesView, tea.Cmd) {
 		v.mode = InvoiceModeForm
 		v.form = newInvoiceForm(v.config, v.width)
 		v.formErr = ""
+		svc := v.services.Client
+		return v, func() tea.Msg {
+			clients, err := svc.List("")
+			return invoicePickerClientsMsg{Clients: clients, Err: err}
+		}
 	case "i":
 		sel := v.selectedInvoice()
 		if sel != nil {
@@ -393,6 +452,26 @@ func (v InvoicesView) handleListKey(msg tea.KeyMsg) (InvoicesView, tea.Cmd) {
 func (v InvoicesView) handleFormKey(msg tea.KeyMsg) (InvoicesView, tea.Cmd) {
 	if v.form == nil {
 		return v, nil
+	}
+
+	// Étape 0 : sélection du client via picker
+	if v.form.step == invoiceStepClient {
+		evt, cmd := v.form.picker.Update(msg)
+		switch evt {
+		case pickerCancelled:
+			v.mode = InvoiceModeList
+			v.form = nil
+			v.formErr = ""
+		case pickerSelected:
+			if sel := v.form.picker.Selected(); sel != nil {
+				v.form.clientID = sel.ID
+				v.form.clientName = sel.Name
+				v.form.step = invoiceStepBasic
+				v.form.basicForm = buildInvoiceBasicForm(v.width, sel.Name)
+				v.formErr = ""
+			}
+		}
+		return v, cmd
 	}
 
 	if v.form.step == invoiceStepBasic {
@@ -670,6 +749,16 @@ func (v InvoicesView) renderForm() string {
 		return ""
 	}
 
+	// Étape 0 : sélection du client
+	if v.form.step == invoiceStepClient {
+		var sb strings.Builder
+		if v.formErr != "" {
+			sb.WriteString(styles.StyleDanger.Render("⚠ "+v.formErr) + "\n\n")
+		}
+		sb.WriteString(v.form.picker.View(v.width))
+		return sb.String()
+	}
+
 	var sb strings.Builder
 
 	if v.formErr != "" {
@@ -922,8 +1011,9 @@ func (v InvoicesView) renderConfirmDelete() string {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 func invoiceColumns(width int) []table.Column {
-	// ID(5)+NUMÉRO(12)+TTC(13)+ÉTAT(12)+ÉCHÉANCE(12)+VIR(12) = 66 + 7cols*2pad = 80 → CLIENT adaptatif plafonné
-	clientW := min(24, max(16, width-90))
+	// Colonnes fixes : ID(5)+NUMÉRO(12)+TTC(13)+ÉTAT(12)+ÉCHÉANCE(12)+VIR(12) = 66 + 7*2pad = 80
+	// CLIENT remplit l'espace restant pour que le tableau occupe toute la largeur
+	clientW := max(14, width-80)
 	return []table.Column{
 		{Title: "ID", Width: 5},
 		{Title: "NUMÉRO", Width: 12},
@@ -966,8 +1056,13 @@ func filterInvoices(invoices []domain.Invoice, search string) []domain.Invoice {
 	q := strings.ToLower(search)
 	var out []domain.Invoice
 	for _, inv := range invoices {
+		clientName := ""
+		if inv.Client != nil {
+			clientName = strings.ToLower(inv.Client.Name)
+		}
 		if strings.Contains(strings.ToLower(inv.Number), q) ||
-			strings.Contains(strings.ToLower(string(inv.State)), q) {
+			strings.Contains(strings.ToLower(string(inv.State)), q) ||
+			strings.Contains(clientName, q) {
 			out = append(out, inv)
 		}
 	}

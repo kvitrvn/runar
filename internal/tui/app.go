@@ -192,6 +192,16 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 
+	case views.OpenInvoiceFormForClientMsg:
+		m.currentView = ViewInvoices
+		m.invoicesView.OpenFormForClient(msg.ClientID, msg.ClientName)
+		return m, m.invoicesView.Load(m.searchQuery)
+
+	case views.OpenQuoteFormForClientMsg:
+		m.currentView = ViewQuotes
+		m.quotesView.OpenFormForClient(msg.ClientID, msg.ClientName)
+		return m, m.quotesView.Load(m.searchQuery)
+
 	case views.OpenCreditNoteFormMsg:
 		m.currentView = ViewCreditNotes
 		m.creditNotesView.OpenFormForInvoice(msg.InvoiceID, msg.InvoiceNumber, msg.TotalHT, msg.VATAmount)
@@ -486,7 +496,8 @@ func (m *App) renderHeader() string {
 	}
 
 	content := left + modeLabel
-	pad := m.width - lipgloss.Width(content) - lipgloss.Width(right)
+	// StyleHeader a Padding(0,1) : espace intérieur = m.width - 2
+	pad := m.width - 2 - lipgloss.Width(content) - lipgloss.Width(right)
 	if pad < 0 {
 		pad = 0
 	}

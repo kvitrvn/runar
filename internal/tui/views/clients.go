@@ -29,6 +29,7 @@ type ClientsLoadedMsg struct{ Clients []domain.Client; Err error }
 type ClientSavedMsg struct{ Err error }
 type ClientDeletedMsg struct{ Err error }
 
+
 // ClientsView est la vue complète de gestion des clients.
 type ClientsView struct {
 	services  *service.Services
@@ -167,6 +168,20 @@ func (v ClientsView) handleListKey(msg tea.KeyMsg) (ClientsView, tea.Cmd) {
 			v.selected = sel
 			v.mode = ClientModeDetail
 		}
+	case "f":
+		sel := v.selectedClient()
+		if sel != nil {
+			return v, func() tea.Msg {
+				return OpenInvoiceFormForClientMsg{ClientID: sel.ID, ClientName: sel.Name}
+			}
+		}
+	case "v":
+		sel := v.selectedClient()
+		if sel != nil {
+			return v, func() tea.Msg {
+				return OpenQuoteFormForClientMsg{ClientID: sel.ID, ClientName: sel.Name}
+			}
+		}
 	default:
 		updated, cmd := v.table.Update(msg)
 		v.table = updated
@@ -202,6 +217,20 @@ func (v ClientsView) handleDetailKey(msg tea.KeyMsg) (ClientsView, tea.Cmd) {
 	case "d":
 		if v.selected != nil {
 			v.mode = ClientModeConfirmDelete
+		}
+	case "f":
+		if v.selected != nil {
+			sel := v.selected
+			return v, func() tea.Msg {
+				return OpenInvoiceFormForClientMsg{ClientID: sel.ID, ClientName: sel.Name}
+			}
+		}
+	case "v":
+		if v.selected != nil {
+			sel := v.selected
+			return v, func() tea.Msg {
+				return OpenQuoteFormForClientMsg{ClientID: sel.ID, ClientName: sel.Name}
+			}
 		}
 	}
 	return v, nil
@@ -301,7 +330,7 @@ func (v ClientsView) renderList() string {
 	sb.WriteString(v.table.View() + "\n")
 
 	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(
-		"  n: Nouveau  e: Éditer  d: Supprimer  Enter: Détail  j/k: Navigation",
+		"  n: Nouveau  e: Éditer  d: Supprimer  f: Facture  v: Devis  Enter: Détail  j/k: Navigation",
 	)
 	sb.WriteString(hint)
 	return sb.String()
@@ -368,7 +397,7 @@ func (v ClientsView) renderDetail() string {
 	}
 
 	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).
-		Render("\n  e: Éditer  d: Supprimer  Esc: Retour")
+		Render("\n  e: Éditer  d: Supprimer  f: Nouvelle facture  v: Nouveau devis  Esc: Retour")
 	content.WriteString(hint)
 
 	return "\n" + box.Render(content.String())
@@ -391,13 +420,14 @@ func (v ClientsView) renderConfirmDelete() string {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 func clientColumns(width int) []table.Column {
-	// Colonnes fixes : ID(5)+NOM(28)+SIRET(16)+VILLE(14) = 63 + 5*2 padding = 73
-	emailW := max(18, width-73)
+	// Colonnes fixes : ID(5)+SIRET(16)+EMAIL(24)+VILLE(14) = 59 + 5*2pad = 69
+	// NOM remplit l'espace restant — le nom est la donnée la plus utile à afficher en entier
+	nomW := max(16, width-69)
 	return []table.Column{
 		{Title: "ID", Width: 5},
-		{Title: "NOM", Width: 28},
+		{Title: "NOM", Width: nomW},
 		{Title: "SIRET", Width: 16},
-		{Title: "EMAIL", Width: emailW},
+		{Title: "EMAIL", Width: 24},
 		{Title: "VILLE", Width: 14},
 	}
 }
@@ -407,9 +437,9 @@ func clientRows(clients []domain.Client) []table.Row {
 	for i, c := range clients {
 		rows[i] = table.Row{
 			fmt.Sprint(c.ID),
-			truncate(c.Name, 28),
+			c.Name,
 			c.SIRET,
-			truncate(c.Email, 20),
+			truncate(c.Email, 24),
 			c.City,
 		}
 	}
