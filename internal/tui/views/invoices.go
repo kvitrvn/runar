@@ -33,6 +33,8 @@ type InvoicesLoadedMsg struct{ Invoices []domain.Invoice; Err error }
 type InvoiceSavedMsg struct{ Err error }
 type InvoicePaidMsg struct{ Err error }
 type InvoiceDeletedMsg struct{ Err error }
+type InvoicePDFMsg struct{ Path string; Err error }
+type OpenCreditNoteFormMsg struct{ InvoiceID int; InvoiceNumber string }
 
 // ─── InvoiceForm (formulaire multi-étapes) ───────────────────────────────────
 
@@ -236,6 +238,13 @@ func (v InvoicesView) Update(msg tea.Msg) (InvoicesView, tea.Cmd) {
 			return v, v.Load(v.search)
 		}
 
+	case InvoicePDFMsg:
+		if msg.Err != nil {
+			v.err = msg.Err.Error()
+		} else {
+			v.err = ""
+		}
+
 	case tea.KeyMsg:
 		switch v.mode {
 		case InvoiceModeList:
@@ -297,6 +306,21 @@ func (v InvoicesView) handleListKey(msg tea.KeyMsg) (InvoicesView, tea.Cmd) {
 			} else {
 				v.err = "Seuls les brouillons peuvent être supprimés"
 			}
+		}
+	case "c":
+		sel := v.selectedInvoice()
+		if sel != nil {
+			if sel.CanCancel() {
+				return v, func() tea.Msg {
+					return OpenCreditNoteFormMsg{InvoiceID: sel.ID, InvoiceNumber: sel.Number}
+				}
+			}
+			v.err = fmt.Sprintf("Impossible de créer un avoir : facture %q (état: %s)", sel.Number, sel.State)
+		}
+	case "p":
+		sel := v.selectedInvoice()
+		if sel != nil {
+			return v, v.generatePDF(sel.ID)
 		}
 	case "enter":
 		sel := v.selectedInvoice()
@@ -406,6 +430,20 @@ func (v InvoicesView) handleDetailKey(msg tea.KeyMsg) (InvoicesView, tea.Cmd) {
 		if v.selected != nil && !v.selected.CanEdit() {
 			v.err = fmt.Sprintf("Facture %s immuable (état: %s)", v.selected.Number, v.selected.State)
 		}
+	case "c":
+		if v.selected != nil {
+			if v.selected.CanCancel() {
+				sel := v.selected
+				return v, func() tea.Msg {
+					return OpenCreditNoteFormMsg{InvoiceID: sel.ID, InvoiceNumber: sel.Number}
+				}
+			}
+			v.err = fmt.Sprintf("Impossible de créer un avoir : facture %q (état: %s)", v.selected.Number, v.selected.State)
+		}
+	case "p":
+		if v.selected != nil {
+			return v, v.generatePDF(v.selected.ID)
+		}
 	}
 	return v, nil
 }
@@ -472,6 +510,15 @@ func (v InvoicesView) deleteInvoice(_ int) tea.Cmd {
 	}
 }
 
+// generatePDF déclenche la génération du PDF de la facture.
+func (v InvoicesView) generatePDF(id int) tea.Cmd {
+	svc := v.services.Invoice
+	return func() tea.Msg {
+		path, err := svc.GeneratePDF(id)
+		return InvoicePDFMsg{Path: path, Err: err}
+	}
+}
+
 // selectedInvoice retourne la facture sélectionnée dans la table.
 func (v InvoicesView) selectedInvoice() *domain.Invoice {
 	row := v.table.SelectedRow()
@@ -516,7 +563,7 @@ func (v InvoicesView) renderList() string {
 	sb.WriteString(v.table.View() + "\n")
 
 	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(
-		"  n: Nouvelle  m: Marquer payée  d: Supprimer (brouillon)  Enter: Détail  j/k: Navigation",
+		"  n: Nouvelle  m: Marquer payée  c: Avoir  p: PDF  d: Supprimer (brouillon)  Enter: Détail  j/k: Nav",
 	)
 	sb.WriteString(hint)
 	return sb.String()
@@ -703,10 +750,10 @@ func (v InvoicesView) renderDetail() string {
 	if inv.CanMarkAsPaid() {
 		actions = append(actions, "m: Marquer payée")
 	}
-	if inv.CanCancel() && isLocked {
-		actions = append(actions, "c: Créer avoir (Sprint 5)")
+	if inv.CanCancel() {
+		actions = append(actions, "c: Créer avoir")
 	}
-	actions = append(actions, "p: PDF (Sprint 5)")
+	actions = append(actions, "p: PDF")
 	actions = append(actions, "Esc: Retour")
 	content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).
 		Render("  " + strings.Join(actions, "  ")))

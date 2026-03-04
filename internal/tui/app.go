@@ -29,8 +29,10 @@ type App struct {
 	mode        AppMode
 
 	// Vues (chargées à la demande)
-	clientsView  views.ClientsView
-	invoicesView views.InvoicesView
+	clientsView     views.ClientsView
+	invoicesView    views.InvoicesView
+	creditNotesView views.CreditNotesView
+	quotesView      views.QuotesView
 
 	// Saisie commande / recherche
 	input textinput.Model
@@ -54,8 +56,10 @@ func NewApp(services *service.Services, cfg *config.Config) *App {
 		currentView:  ViewPulse,
 		mode:         ModeNormal,
 		input:        ti,
-		clientsView:  views.NewClientsView(services, 80, 20),
-		invoicesView: views.NewInvoicesView(services, cfg, 80, 20),
+		clientsView:     views.NewClientsView(services, 80, 20),
+		invoicesView:    views.NewInvoicesView(services, cfg, 80, 20),
+		creditNotesView: views.NewCreditNotesView(services, 80, 20),
+		quotesView:      views.NewQuotesView(services, cfg, 80, 20),
 	}
 }
 
@@ -81,6 +85,8 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mainH := m.height - 3
 		m.clientsView.SetSize(m.width, mainH)
 		m.invoicesView.SetSize(m.width, mainH)
+		m.creditNotesView.SetSize(m.width, mainH)
+		m.quotesView.SetSize(m.width, mainH)
 
 	case tickMsg:
 		if m.toast != nil && !m.toast.IsVisible() {
@@ -154,6 +160,44 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.invoicesView, cmd = m.invoicesView.Update(msg)
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
+
+	case views.InvoicePDFMsg:
+		if msg.Err != nil {
+			m.showToast("PDF facture : "+msg.Err.Error(), ToastError)
+		} else {
+			m.showToast("PDF généré : "+msg.Path, ToastSuccess)
+		}
+		var cmd tea.Cmd
+		m.invoicesView, cmd = m.invoicesView.Update(msg)
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
+
+	case views.OpenCreditNoteFormMsg:
+		m.currentView = ViewCreditNotes
+		m.creditNotesView.OpenFormForInvoice(msg.InvoiceID, msg.InvoiceNumber)
+		return m, nil
+
+	case views.CreditNotesLoadedMsg, views.CreditNoteSavedMsg, views.CreditNotePDFMsg:
+		var cmd tea.Cmd
+		m.creditNotesView, cmd = m.creditNotesView.Update(msg)
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
+
+	case views.QuotesLoadedMsg, views.QuoteSavedMsg, views.QuotePDFMsg, views.QuoteStateChangedMsg:
+		var cmd tea.Cmd
+		m.quotesView, cmd = m.quotesView.Update(msg)
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
+
+	case views.QuoteConvertedMsg:
+		if msg.Err != nil {
+			m.showToast("Conversion échouée : "+msg.Err.Error(), ToastError)
+		} else {
+			m.showToast("Devis converti → Facture "+msg.InvoiceNumber, ToastSuccess)
+			m.currentView = ViewInvoices
+			cmds = append(cmds, m.invoicesView.Load(m.searchQuery))
+		}
+		return m, tea.Batch(cmds...)
 	}
 
 	// Déléguer à la vue active
@@ -163,6 +207,10 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clientsView, viewCmd = m.clientsView.Update(msg)
 	case ViewInvoices:
 		m.invoicesView, viewCmd = m.invoicesView.Update(msg)
+	case ViewCreditNotes:
+		m.creditNotesView, viewCmd = m.creditNotesView.Update(msg)
+	case ViewQuotes:
+		m.quotesView, viewCmd = m.quotesView.Update(msg)
 	}
 	if viewCmd != nil {
 		cmds = append(cmds, viewCmd)
@@ -178,6 +226,10 @@ func (m *App) isActiveViewInputBusy() bool {
 		return m.clientsView.IsInputActive()
 	case ViewInvoices:
 		return m.invoicesView.IsInputActive()
+	case ViewCreditNotes:
+		return m.creditNotesView.IsInputActive()
+	case ViewQuotes:
+		return m.quotesView.IsInputActive()
 	}
 	return false
 }
@@ -278,6 +330,10 @@ func (m *App) loadCurrentView() tea.Cmd {
 		return m.clientsView.Load(m.searchQuery)
 	case ViewInvoices:
 		return m.invoicesView.Load(m.searchQuery)
+	case ViewCreditNotes:
+		return m.creditNotesView.Load()
+	case ViewQuotes:
+		return m.quotesView.Load(m.searchQuery)
 	}
 	return nil
 }
@@ -445,15 +501,9 @@ func (m *App) renderActiveView() (title, content string) {
 			[]string{"CA annuel", "Factures par état", "Alertes TVA", "Graphique mensuel"},
 		)
 	case ViewQuotes:
-		return "DEVIS", renderPlaceholderView(
-			"Liste des devis — Sprint 6",
-			[]string{"n: Nouveau  f: Convertir en facture  p: PDF"},
-		)
+		return "DEVIS", m.quotesView.View()
 	case ViewCreditNotes:
-		return "AVOIRS", renderPlaceholderView(
-			"Liste des avoirs — Sprint 5",
-			[]string{"c: Créer avoir  p: PDF  Enter: Voir"},
-		)
+		return "AVOIRS", m.creditNotesView.View()
 	}
 	return "INCONNU", ""
 }

@@ -1,4 +1,7 @@
 bin/
+invoices/
 
 *.db
 *.out
+*.db-shm
+*.db-wal

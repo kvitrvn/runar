@@ -1,9 +1,13 @@
 package service
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/kvitrvn/runar/internal/config"
 	"github.com/kvitrvn/runar/internal/domain"
 	"github.com/kvitrvn/runar/internal/repository"
+	"github.com/shopspring/decimal"
 )
 
 // QuoteService gère les opérations sur les devis.
@@ -12,6 +16,7 @@ type QuoteService struct {
 	clientRepo  repository.ClientRepository
 	invoiceRepo repository.InvoiceRepository
 	audit       *AuditService
+	pdf         *PDFService
 	cfg         *config.Config
 	numbering   domain.NumberingConfig
 }
@@ -22,6 +27,7 @@ func NewQuoteService(
 	clientRepo repository.ClientRepository,
 	invoiceRepo repository.InvoiceRepository,
 	audit *AuditService,
+	pdf *PDFService,
 	cfg *config.Config,
 ) *QuoteService {
 	return &QuoteService{
@@ -29,6 +35,7 @@ func NewQuoteService(
 		clientRepo:  clientRepo,
 		invoiceRepo: invoiceRepo,
 		audit:       audit,
+		pdf:         pdf,
 		cfg:         cfg,
 		numbering:   domain.DefaultNumberingConfig(),
 	}
@@ -43,6 +50,7 @@ func (s *QuoteService) Create(q *domain.Quote) error {
 		return err
 	}
 	q.Number = number
+	q.State = domain.QuoteStateDraft
 
 	if err := s.quoteRepo.Create(q); err != nil {
 		return err
@@ -62,6 +70,120 @@ func (s *QuoteService) List(search string) ([]domain.Quote, error) {
 	return s.quoteRepo.List(search)
 }
 
+// MarkAsSent marque un devis comme envoyé (draft → sent).
+func (s *QuoteService) MarkAsSent(id int) error {
+	q, err := s.quoteRepo.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if q.State != domain.QuoteStateDraft {
+		return fmt.Errorf("seul un brouillon peut être marqué envoyé (état: %s)", q.State)
+	}
+	prev := string(q.State)
+	q.State = domain.QuoteStateSent
+	if err := s.quoteRepo.Update(id, q); err != nil {
+		return err
+	}
+	s.audit.Log("quote", id, domain.AuditActionUpdated, prev, string(q.State))
+	return nil
+}
+
+// MarkAsAccepted marque un devis comme accepté (draft/sent → accepted).
+func (s *QuoteService) MarkAsAccepted(id int) error {
+	q, err := s.quoteRepo.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if q.State != domain.QuoteStateDraft && q.State != domain.QuoteStateSent {
+		return fmt.Errorf("impossible d'accepter un devis %q", q.State)
+	}
+	prev := string(q.State)
+	q.State = domain.QuoteStateAccepted
+	if err := s.quoteRepo.Update(id, q); err != nil {
+		return err
+	}
+	s.audit.Log("quote", id, domain.AuditActionUpdated, prev, string(q.State))
+	return nil
+}
+
+// MarkAsRefused marque un devis comme refusé (draft/sent → refused).
+func (s *QuoteService) MarkAsRefused(id int) error {
+	q, err := s.quoteRepo.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if q.State != domain.QuoteStateDraft && q.State != domain.QuoteStateSent {
+		return fmt.Errorf("impossible de refuser un devis %q", q.State)
+	}
+	prev := string(q.State)
+	q.State = domain.QuoteStateRefused
+	if err := s.quoteRepo.Update(id, q); err != nil {
+		return err
+	}
+	s.audit.Log("quote", id, domain.AuditActionUpdated, prev, string(q.State))
+	return nil
+}
+
+// PrepareInvoiceFromQuote construit une domain.Invoice depuis un devis accepté.
+// Le appelant doit persister l'invoice via InvoiceService.Create().
+func (s *QuoteService) PrepareInvoiceFromQuote(quoteID int) (*domain.Invoice, error) {
+	q, err := s.quoteRepo.GetByID(quoteID)
+	if err != nil {
+		return nil, err
+	}
+	if !q.CanConvertToInvoice() {
+		return nil, fmt.Errorf("seul un devis accepté peut être converti (état: %s)", q.State)
+	}
+
+	inv := &domain.Invoice{
+		ClientID:         q.ClientID,
+		QuoteID:          &quoteID,
+		IssueDate:        time.Now(),
+		DueDate:          time.Now().AddDate(0, 0, 30),
+		DeliveryDate:     time.Now(),
+		State:            domain.InvoiceStateDraft,
+		Notes:            q.Notes,
+		VATApplicable:    s.cfg.VAT.Applicable,
+		VATExemptionText: s.cfg.VAT.ExemptionText,
+		PaymentDeadline:  s.cfg.Payment.DefaultDeadline,
+		LatePenaltyRate:  decimal.NewFromFloat(s.cfg.Payment.LatePenaltyRate),
+		RecoveryFee:      decimal.NewFromFloat(s.cfg.Payment.RecoveryFee),
+	}
+
+	for _, ql := range q.Lines {
+		il := domain.InvoiceLine{
+			Description: ql.Description,
+			Quantity:    ql.Quantity,
+			UnitPriceHT: ql.UnitPriceHT,
+			VATRate:     ql.VATRate,
+		}
+		il.Calculate()
+		inv.Lines = append(inv.Lines, il)
+	}
+
+	s.audit.Log("quote", quoteID, domain.AuditActionUpdated, string(domain.QuoteStateAccepted),
+		fmt.Sprintf(`{"action":"converted_to_invoice","client_id":%d}`, q.ClientID))
+	return inv, nil
+}
+
+// GeneratePDF génère le PDF d'un devis.
+func (s *QuoteService) GeneratePDF(id int) (string, error) {
+	q, err := s.quoteRepo.GetByID(id)
+	if err != nil {
+		return "", err
+	}
+	pdfPath, err := s.pdf.GenerateQuote(q)
+	if err != nil {
+		return "", fmt.Errorf("génération PDF devis: %w", err)
+	}
+	q.PDFPath = pdfPath
+	if err := s.quoteRepo.Update(id, q); err != nil {
+		return "", err
+	}
+	s.audit.Log("quote", id, domain.AuditActionPDFGenerated, "", fmt.Sprintf(`{"pdf_path":%q}`, pdfPath))
+	return pdfPath, nil
+}
+
 func (s *QuoteService) generateNextNumber(year int) (string, error) {
 	lastSeq, err := s.quoteRepo.GetLastSequence(year)
 	if err != nil {
@@ -76,6 +198,7 @@ type CreditNoteService struct {
 	cnRepo      repository.CreditNoteRepository
 	invoiceRepo repository.InvoiceRepository
 	audit       *AuditService
+	pdf         *PDFService
 	numbering   domain.NumberingConfig
 }
 
@@ -84,11 +207,13 @@ func NewCreditNoteService(
 	cnRepo repository.CreditNoteRepository,
 	invoiceRepo repository.InvoiceRepository,
 	audit *AuditService,
+	pdf *PDFService,
 ) *CreditNoteService {
 	return &CreditNoteService{
 		cnRepo:      cnRepo,
 		invoiceRepo: invoiceRepo,
 		audit:       audit,
+		pdf:         pdf,
 		numbering:   domain.DefaultNumberingConfig(),
 	}
 }
@@ -108,6 +233,13 @@ func (s *CreditNoteService) CreateFromInvoice(invoiceID int, cn *domain.CreditNo
 		}
 	}
 
+	// Numérotation continue
+	lastSeq, err := s.cnRepo.GetLastSequence(cn.IssueDate.Year())
+	if err != nil {
+		return fmt.Errorf("numérotation avoir: %w", err)
+	}
+	cn.Number = s.numbering.FormatCreditNoteNumber(cn.IssueDate.Year(), lastSeq+1)
+
 	// Référence obligatoire
 	cn.InvoiceID = invoiceID
 	cn.InvoiceReference = invoice.Number
@@ -123,4 +255,32 @@ func (s *CreditNoteService) CreateFromInvoice(invoiceID int, cn *domain.CreditNo
 
 	s.audit.Log("credit_note", cn.ID, domain.AuditActionCreated, "", "")
 	return nil
+}
+
+// List retourne tous les avoirs.
+func (s *CreditNoteService) List() ([]domain.CreditNote, error) {
+	return s.cnRepo.List()
+}
+
+// GetByID retourne un avoir par son ID.
+func (s *CreditNoteService) GetByID(id int) (*domain.CreditNote, error) {
+	return s.cnRepo.GetByID(id)
+}
+
+// GeneratePDF génère le PDF d'un avoir.
+// LEGAL: Le PDF ne doit jamais être supprimé (conservation 10 ans).
+func (s *CreditNoteService) GeneratePDF(id int) (string, error) {
+	cn, err := s.cnRepo.GetByID(id)
+	if err != nil {
+		return "", err
+	}
+	pdfPath, err := s.pdf.GenerateCreditNote(cn)
+	if err != nil {
+		return "", fmt.Errorf("génération PDF avoir: %w", err)
+	}
+	if err := s.cnRepo.UpdatePDFPath(id, pdfPath); err != nil {
+		return "", err
+	}
+	s.audit.Log("credit_note", id, domain.AuditActionPDFGenerated, "", fmt.Sprintf(`{"pdf_path":%q}`, pdfPath))
+	return pdfPath, nil
 }
