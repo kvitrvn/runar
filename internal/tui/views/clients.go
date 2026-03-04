@@ -311,12 +311,13 @@ func (v ClientsView) renderForm() string {
 	if v.form == nil {
 		return ""
 	}
-	title := "Nouveau client"
-	if v.mode == ClientModeEdit {
-		title = "Modifier client"
+	var sb strings.Builder
+	sb.WriteString("\n")
+	if v.err != "" {
+		sb.WriteString(styles.StyleDanger.Render("⚠ "+v.err) + "\n\n")
 	}
-	_ = title
-	return "\n" + v.form.View()
+	sb.WriteString(v.form.View())
+	return sb.String()
 }
 
 func (v ClientsView) renderDetail() string {
@@ -435,8 +436,8 @@ func filterClients(clients []domain.Client, search string) []domain.Client {
 func newClientForm(width int) *components.Form {
 	fields := []components.FormField{
 		components.NewField("Nom", "Acme Corporation", true),
-		components.NewField("SIRET", "12345678901234", false),
-		components.NewField("SIREN", "123456789", false),
+		components.NewField("SIRET", "", false),
+		components.NewField("SIREN", "", false),
 		components.NewField("Adresse", "123 Rue de la Paix", false),
 		components.NewField("Code postal", "75001", false),
 		components.NewField("Ville", "Paris", false),

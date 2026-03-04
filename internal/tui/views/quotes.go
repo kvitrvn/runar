@@ -542,13 +542,13 @@ func (v QuotesView) renderForm() string {
 				lineStyle = lineStyle.Background(lipgloss.Color("#1E3A5F"))
 				prefix = "> "
 			}
-			sb.WriteString(lineStyle.Render(fmt.Sprintf("%s%-40s  %8s  %12s€  %12s€\n",
+			sb.WriteString(lineStyle.Render(fmt.Sprintf("%s%-40s  %8s  %12s€  %12s€",
 				prefix,
 				truncate(line.description, 40),
 				line.quantity,
 				price.StringFixed(2),
 				total.StringFixed(2),
-			)))
+			)) + "\n")
 		}
 
 		// Total
