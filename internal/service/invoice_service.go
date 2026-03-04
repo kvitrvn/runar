@@ -1,6 +1,7 @@
 package service
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -10,6 +11,18 @@ import (
 	"github.com/kvitrvn/runar/internal/repository"
 	"github.com/shopspring/decimal"
 )
+
+// generatePaymentRef génère un code de virement unique de 8 caractères alphanumériques (A-Z0-9).
+// Ce code sert de libellé de virement bancaire pour identifier le paiement.
+func generatePaymentRef() string {
+	const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	for i, c := range b {
+		b[i] = chars[int(c)%len(chars)]
+	}
+	return string(b)
+}
 
 // InvoiceService gère les opérations sur les factures avec les règles légales.
 type InvoiceService struct {
@@ -65,6 +78,11 @@ func (s *InvoiceService) Create(inv *domain.Invoice) error {
 		return fmt.Errorf("génération numéro: %w", err)
 	}
 	inv.Number = number
+
+	// Générer le libellé de virement unique
+	if inv.PaymentRef == "" {
+		inv.PaymentRef = generatePaymentRef()
+	}
 
 	// Charger client pour validation B2B
 	if inv.ClientID > 0 && inv.Client == nil {

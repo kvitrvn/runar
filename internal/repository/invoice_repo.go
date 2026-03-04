@@ -63,6 +63,8 @@ type invoiceRow struct {
 	EInvoiceSentAt   sql.NullTime   `db:"e_invoice_sent_at"`
 	EInvoicePDPRef   sql.NullString `db:"e_invoice_pdp_ref"`
 	VATPaymentOption sql.NullString `db:"vat_payment_option"`
+	// Colonnes migration 004 (libellé virement)
+	PaymentRef string `db:"payment_ref"`
 }
 
 func (r invoiceRow) toDomain() domain.Invoice {
@@ -110,6 +112,7 @@ func (r invoiceRow) toDomain() domain.Invoice {
 	inv.VATAmount, _ = decimal.NewFromString(r.VATAmount)
 	inv.LatePenaltyRate, _ = decimal.NewFromString(r.LatePenaltyRate)
 	inv.RecoveryFee, _ = decimal.NewFromString(r.RecoveryFee)
+	inv.PaymentRef = r.PaymentRef
 	return inv
 }
 
@@ -135,13 +138,13 @@ func (r *invoiceRepository) Create(inv *domain.Invoice) error {
 			state, total_ht, total_ttc, vat_amount, vat_applicable,
 			vat_exemption_text, payment_deadline, late_penalty_rate,
 			recovery_fee, early_payment_disc, operation_category,
-			delivery_address, notes
+			delivery_address, notes, payment_ref
 		) VALUES (
 			:number, :client_id, :quote_id, :issue_date, :due_date, :delivery_date,
 			:state, :total_ht, :total_ttc, :vat_amount, :vat_applicable,
 			:vat_exemption_text, :payment_deadline, :late_penalty_rate,
 			:recovery_fee, :early_payment_disc, :operation_category,
-			:delivery_address, :notes
+			:delivery_address, :notes, :payment_ref
 		)
 	`
 
@@ -170,6 +173,7 @@ func (r *invoiceRepository) Create(inv *domain.Invoice) error {
 		"operation_category": nilIfEmpty(string(inv.OperationCategory)),
 		"delivery_address":   nilIfEmpty(inv.DeliveryAddress),
 		"notes":              nilIfEmpty(inv.Notes),
+		"payment_ref":        inv.PaymentRef,
 	}
 
 	result, err := tx.NamedExec(query, row)
@@ -229,7 +233,7 @@ func (r *invoiceRepository) Update(id int, inv *domain.Invoice) error {
 			late_penalty_rate = :late_penalty_rate, recovery_fee = :recovery_fee,
 			early_payment_disc = :early_payment_disc, operation_category = :operation_category,
 			delivery_address = :delivery_address, notes = :notes, pdf_path = :pdf_path,
-			updated_at = CURRENT_TIMESTAMP
+			payment_ref = :payment_ref, updated_at = CURRENT_TIMESTAMP
 		WHERE id = :id
 	`
 	row := map[string]interface{}{
@@ -253,6 +257,7 @@ func (r *invoiceRepository) Update(id int, inv *domain.Invoice) error {
 		"delivery_address":   nilIfEmpty(inv.DeliveryAddress),
 		"notes":              nilIfEmpty(inv.Notes),
 		"pdf_path":           nilIfEmpty(inv.PDFPath),
+		"payment_ref":        inv.PaymentRef,
 	}
 	_, err := r.db.NamedExec(query, row)
 	return err

@@ -172,6 +172,13 @@ func (s *QuoteService) GeneratePDF(id int) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if q.Client == nil && q.ClientID > 0 {
+		client, err := s.clientRepo.GetByID(q.ClientID)
+		if err != nil {
+			return "", fmt.Errorf("chargement client devis: %w", err)
+		}
+		q.Client = client
+	}
 	pdfPath, err := s.pdf.GenerateQuote(q)
 	if err != nil {
 		return "", fmt.Errorf("génération PDF devis: %w", err)
@@ -197,6 +204,7 @@ func (s *QuoteService) generateNextNumber(year int) (string, error) {
 type CreditNoteService struct {
 	cnRepo      repository.CreditNoteRepository
 	invoiceRepo repository.InvoiceRepository
+	clientRepo  repository.ClientRepository
 	audit       *AuditService
 	pdf         *PDFService
 	numbering   domain.NumberingConfig
@@ -206,12 +214,14 @@ type CreditNoteService struct {
 func NewCreditNoteService(
 	cnRepo repository.CreditNoteRepository,
 	invoiceRepo repository.InvoiceRepository,
+	clientRepo repository.ClientRepository,
 	audit *AuditService,
 	pdf *PDFService,
 ) *CreditNoteService {
 	return &CreditNoteService{
 		cnRepo:      cnRepo,
 		invoiceRepo: invoiceRepo,
+		clientRepo:  clientRepo,
 		audit:       audit,
 		pdf:         pdf,
 		numbering:   domain.DefaultNumberingConfig(),
@@ -273,6 +283,16 @@ func (s *CreditNoteService) GeneratePDF(id int) (string, error) {
 	cn, err := s.cnRepo.GetByID(id)
 	if err != nil {
 		return "", err
+	}
+	// Charger le client via la facture d'origine
+	if cn.Client == nil && cn.InvoiceID > 0 {
+		invoice, err := s.invoiceRepo.GetByID(cn.InvoiceID)
+		if err == nil && invoice.ClientID > 0 {
+			client, err := s.clientRepo.GetByID(invoice.ClientID)
+			if err == nil {
+				cn.Client = client
+			}
+		}
 	}
 	pdfPath, err := s.pdf.GenerateCreditNote(cn)
 	if err != nil {

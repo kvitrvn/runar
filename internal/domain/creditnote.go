@@ -15,7 +15,8 @@ type CreditNote struct {
 	InvoiceID        int
 	InvoiceReference string    // Numéro et date de la facture d'origine (obligatoire)
 	IssueDate        time.Time
-	Reason           string // Motif de l'avoir (obligatoire)
+	Reason           string  // Motif de l'avoir (obligatoire)
+	Client           *Client // Relation chargée à la demande (depuis la facture d'origine)
 	Lines            []CreditNoteLine
 	TotalHT          decimal.Decimal // Négatif
 	TotalTTC         decimal.Decimal // Négatif

@@ -24,7 +24,7 @@ func NewServices(repos *repository.Repositories, cfg *config.Config) *Services {
 		Client:     NewClientService(repos.Client, auditService),
 		Invoice:    NewInvoiceService(repos.Invoice, repos.Client, auditService, pdfService, cfg),
 		Quote:      NewQuoteService(repos.Quote, repos.Client, repos.Invoice, auditService, pdfService, cfg),
-		CreditNote: NewCreditNoteService(repos.CreditNote, repos.Invoice, auditService, pdfService),
+		CreditNote: NewCreditNoteService(repos.CreditNote, repos.Invoice, repos.Client, auditService, pdfService),
 		Audit:      auditService,
 		PDF:        pdfService,
 	}

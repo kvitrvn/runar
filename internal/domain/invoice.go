@@ -54,6 +54,9 @@ type Invoice struct {
 	RecoveryFee          decimal.Decimal // LEGAL: 40€ forfaitaire obligatoire
 	EarlyPaymentDiscount string          // Escompte optionnel
 
+	// Paiement par virement
+	PaymentRef string // Code virement 8 chars A-Z0-9, unique par facture, utilisé comme libellé de virement
+
 	// Mentions 2027
 	OperationCategory OperationCategory
 	DeliveryAddress   string // Si différente de l'adresse client
