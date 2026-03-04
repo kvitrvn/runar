@@ -5,3 +5,4 @@ invoices/
 *.out
 *.db-shm
 *.db-wal
+*.yaml
