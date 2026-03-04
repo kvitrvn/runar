@@ -9,6 +9,7 @@ type Command struct {
 	Description string
 	View        ViewType
 	IsQuit      bool
+	Action      string // Pour les commandes non-navigation (ex: "export-factures")
 }
 
 // commands liste toutes les commandes disponibles.
@@ -18,6 +19,8 @@ var commands = []Command{
 	{Name: "factures", Description: "Liste des factures", View: ViewInvoices},
 	{Name: "devis", Description: "Liste des devis", View: ViewQuotes},
 	{Name: "avoirs", Description: "Liste des avoirs", View: ViewCreditNotes},
+	{Name: "export", Aliases: []string{"export-factures"}, Description: "Exporter factures en CSV (année courante)", Action: "export-factures"},
+	{Name: "export-avoirs", Description: "Exporter avoirs en CSV", Action: "export-avoirs"},
 	{Name: "quit", Aliases: []string{"q"}, Description: "Quitter l'application", IsQuit: true},
 	{Name: "help", Aliases: []string{"h"}, Description: "Afficher l'aide"},
 }

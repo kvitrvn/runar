@@ -27,14 +27,18 @@ type FormField struct {
 	Required    bool
 }
 
-// NewField crée un champ de formulaire.
-func NewField(label, placeholder string, required bool) FormField {
+// NewField crée un champ de formulaire avec une valeur par défaut pré-remplie.
+// Le paramètre defaultValue sert à la fois de placeholder et de valeur initiale éditable.
+func NewField(label, defaultValue string, required bool) FormField {
 	ti := textinput.New()
-	ti.Placeholder = placeholder
+	ti.Placeholder = defaultValue
+	if defaultValue != "" {
+		ti.SetValue(defaultValue)
+	}
 	ti.Width = 40
 	return FormField{
 		Label:       label,
-		Placeholder: placeholder,
+		Placeholder: defaultValue,
 		Required:    required,
 		Input:       ti,
 	}

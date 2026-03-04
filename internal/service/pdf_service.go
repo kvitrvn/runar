@@ -354,18 +354,22 @@ func buildInvoicePDF(inv *domain.Invoice, cfg *appcfg.Config) core.Maroto {
 
 	m.AddRow(6) // espace
 
-	// ── Coordonnées bancaires (si IBAN configuré)
-	if cfg.Payment.IBAN != "" {
+	// ── Coordonnées bancaires
+	// Le libellé de virement est toujours affiché ; IBAN/BIC seulement si configurés.
+	if inv.PaymentRef != "" || cfg.Payment.IBAN != "" {
 		m.AddRow(6, col.New(12).Add(text.New("COORDONNÉES BANCAIRES",
 			props.Text{Size: 9, Style: fontstyle.Bold, Color: colorGray})))
-		m.AddRow(5, col.New(12).Add(text.New("IBAN : "+cfg.Payment.IBAN, txtSmall)))
+		if cfg.Payment.IBAN != "" {
+			m.AddRow(5, col.New(12).Add(text.New("IBAN : "+cfg.Payment.IBAN, txtSmall)))
+		}
 		if cfg.Payment.BIC != "" {
 			m.AddRow(5, col.New(12).Add(text.New("BIC  : "+cfg.Payment.BIC, txtSmall)))
 		}
 		if inv.PaymentRef != "" {
-			m.AddRow(5, col.New(12).Add(text.New("Libellé virement : "+inv.PaymentRef, txtSmall)))
+			m.AddRow(5, col.New(12).Add(text.New("Libellé virement : "+inv.PaymentRef,
+				props.Text{Size: 10, Style: fontstyle.Bold, Color: colorBlack})))
 			m.AddRow(5, col.New(12).Add(text.New(
-				"Merci d'utiliser ce libellé lors de votre virement bancaire.",
+				"Merci d'indiquer ce libellé lors de votre virement bancaire.",
 				props.Text{Size: 9, Style: fontstyle.Italic, Color: colorGray},
 			)))
 		}

@@ -29,6 +29,7 @@ type App struct {
 	mode        AppMode
 
 	// Vues (chargées à la demande)
+	dashboardView   views.DashboardView
 	clientsView     views.ClientsView
 	invoicesView    views.InvoicesView
 	creditNotesView views.CreditNotesView
@@ -51,11 +52,12 @@ func NewApp(services *service.Services, cfg *config.Config) *App {
 	ti.CharLimit = 64
 
 	return &App{
-		services:     services,
-		config:       cfg,
-		currentView:  ViewPulse,
-		mode:         ModeNormal,
-		input:        ti,
+		services:        services,
+		config:          cfg,
+		currentView:     ViewPulse,
+		mode:            ModeNormal,
+		input:           ti,
+		dashboardView:   views.NewDashboardView(services, cfg, 80, 20),
 		clientsView:     views.NewClientsView(services, 80, 20),
 		invoicesView:    views.NewInvoicesView(services, cfg, 80, 20),
 		creditNotesView: views.NewCreditNotesView(services, 80, 20),
@@ -65,7 +67,7 @@ func NewApp(services *service.Services, cfg *config.Config) *App {
 
 // Init implémente tea.Model.
 func (m *App) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, tickCmd())
+	return tea.Batch(textinput.Blink, tickCmd(), m.dashboardView.Load())
 }
 
 func tickCmd() tea.Cmd {
@@ -83,6 +85,7 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		mainH := m.height - 3
+		m.dashboardView.SetSize(m.width, mainH)
 		m.clientsView.SetSize(m.width, mainH)
 		m.invoicesView.SetSize(m.width, mainH)
 		m.creditNotesView.SetSize(m.width, mainH)
@@ -147,6 +150,22 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+
+	// Dashboard
+	case views.DashboardLoadedMsg:
+		var cmd tea.Cmd
+		m.dashboardView, cmd = m.dashboardView.Update(msg)
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
+
+	// Export CSV
+	case views.ExportDoneMsg:
+		if msg.Err != nil {
+			m.showToast("Export échoué : "+msg.Err.Error(), ToastError)
+		} else {
+			m.showToast("Export créé : "+msg.Path, ToastSuccess)
+		}
+		return m, nil
 
 	// Messages des vues
 	case views.ClientsLoadedMsg, views.ClientSavedMsg, views.ClientDeletedMsg:
@@ -348,6 +367,9 @@ func (m *App) executeCommand(raw string) tea.Cmd {
 		m.mode = ModeHelp
 		return nil
 	}
+	if cmd.Action != "" {
+		return m.executeAction(cmd.Action)
+	}
 	prev := m.currentView
 	m.currentView = cmd.View
 	m.searchQuery = ""
@@ -357,9 +379,37 @@ func (m *App) executeCommand(raw string) tea.Cmd {
 	return nil
 }
 
+// executeAction exécute une action non-navigation (export, etc.).
+func (m *App) executeAction(action string) tea.Cmd {
+	svc := m.services.Export
+	outputDir := "./exports"
+	if m.config != nil && m.config.PDF.OutputDir != "" {
+		outputDir = m.config.PDF.OutputDir
+	}
+	year := time.Now().Year()
+
+	switch action {
+	case "export-factures":
+		m.showToast("Export factures en cours...", ToastInfo)
+		return func() tea.Msg {
+			path, err := svc.ExportInvoicesCSV(year, outputDir)
+			return views.ExportDoneMsg{Path: path, Err: err}
+		}
+	case "export-avoirs":
+		m.showToast("Export avoirs en cours...", ToastInfo)
+		return func() tea.Msg {
+			path, err := svc.ExportCreditNotesCSV(outputDir)
+			return views.ExportDoneMsg{Path: path, Err: err}
+		}
+	}
+	return nil
+}
+
 // loadCurrentView déclenche le chargement des données pour la vue courante.
 func (m *App) loadCurrentView() tea.Cmd {
 	switch m.currentView {
+	case ViewPulse:
+		return m.dashboardView.Load()
 	case ViewClients:
 		return m.clientsView.Load(m.searchQuery)
 	case ViewInvoices:
@@ -530,10 +580,7 @@ func (m *App) renderActiveView() (title, content string) {
 	case ViewInvoices:
 		return "FACTURES", m.invoicesView.View()
 	case ViewPulse:
-		return "DASHBOARD", renderPlaceholderView(
-			"Tableau de bord — Sprint 7",
-			[]string{"CA annuel", "Factures par état", "Alertes TVA", "Graphique mensuel"},
-		)
+		return "DASHBOARD", m.dashboardView.View()
 	case ViewQuotes:
 		return "DEVIS", m.quotesView.View()
 	case ViewCreditNotes:

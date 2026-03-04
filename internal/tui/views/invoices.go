@@ -411,12 +411,24 @@ func (v InvoicesView) handleFormKey(msg tea.KeyMsg) (InvoicesView, tea.Cmd) {
 				v.form.lineForm = nil
 			}
 		case components.FormEventSubmit:
-			// Ajouter la ligne
+			// Valider avant d'ajouter la ligne
 			lf := v.form.lineForm
+			desc := lf.Value(0)
+			qtyStr := lf.Value(1)
+			priceStr := lf.Value(2)
+			qty, _ := decimal.NewFromString(qtyStr)
+			if desc == "" {
+				v.formErr = "La description est obligatoire"
+				return v, nil
+			}
+			if qty.IsZero() || qty.IsNegative() {
+				v.formErr = "La quantité doit être supérieure à 0"
+				return v, nil
+			}
 			v.form.lines = append(v.form.lines, lineEntry{
-				description: lf.Value(0),
-				quantity:    lf.Value(1),
-				unitPrice:   lf.Value(2),
+				description: desc,
+				quantity:    qtyStr,
+				unitPrice:   priceStr,
 			})
 			v.form.lineForm = nil
 			v.formErr = ""

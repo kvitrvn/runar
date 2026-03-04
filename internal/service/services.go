@@ -13,6 +13,7 @@ type Services struct {
 	CreditNote *CreditNoteService
 	Audit      *AuditService
 	PDF        *PDFService
+	Export     *ExportService
 }
 
 // NewServices crée tous les services.
@@ -27,5 +28,6 @@ func NewServices(repos *repository.Repositories, cfg *config.Config) *Services {
 		CreditNote: NewCreditNoteService(repos.CreditNote, repos.Invoice, repos.Client, auditService, pdfService),
 		Audit:      auditService,
 		PDF:        pdfService,
+		Export:     NewExportService(repos.Invoice, repos.CreditNote),
 	}
 }
