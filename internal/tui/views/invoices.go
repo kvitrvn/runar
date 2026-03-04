@@ -36,7 +36,12 @@ type InvoiceDeletedMsg struct{ Err error }
 type InvoiceIssuedMsg struct{ Err error }
 type InvoiceSentMsg struct{ Err error }
 type InvoicePDFMsg struct{ Path string; Err error }
-type OpenCreditNoteFormMsg struct{ InvoiceID int; InvoiceNumber string }
+type OpenCreditNoteFormMsg struct {
+	InvoiceID     int
+	InvoiceNumber string
+	TotalHT       string // pré-remplissage montant HT
+	VATAmount     string // pré-remplissage TVA
+}
 
 // ─── InvoiceForm (formulaire multi-étapes) ───────────────────────────────────
 
@@ -342,7 +347,12 @@ func (v InvoicesView) handleListKey(msg tea.KeyMsg) (InvoicesView, tea.Cmd) {
 		if sel != nil {
 			if sel.CanCancel() {
 				return v, func() tea.Msg {
-					return OpenCreditNoteFormMsg{InvoiceID: sel.ID, InvoiceNumber: sel.Number}
+					return OpenCreditNoteFormMsg{
+						InvoiceID:     sel.ID,
+						InvoiceNumber: sel.Number,
+						TotalHT:       sel.TotalHT.StringFixed(2),
+						VATAmount:     sel.VATAmount.StringFixed(2),
+					}
 				}
 			}
 			v.err = fmt.Sprintf("Impossible de créer un avoir : facture %q (état: %s)", sel.Number, sel.State)
@@ -473,7 +483,12 @@ func (v InvoicesView) handleDetailKey(msg tea.KeyMsg) (InvoicesView, tea.Cmd) {
 			if v.selected.CanCancel() {
 				sel := v.selected
 				return v, func() tea.Msg {
-					return OpenCreditNoteFormMsg{InvoiceID: sel.ID, InvoiceNumber: sel.Number}
+					return OpenCreditNoteFormMsg{
+						InvoiceID:     sel.ID,
+						InvoiceNumber: sel.Number,
+						TotalHT:       sel.TotalHT.StringFixed(2),
+						VATAmount:     sel.VATAmount.StringFixed(2),
+					}
 				}
 			}
 			v.err = fmt.Sprintf("Impossible de créer un avoir : facture %q (état: %s)", v.selected.Number, v.selected.State)

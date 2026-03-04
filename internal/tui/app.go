@@ -175,16 +175,38 @@ func (m *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case views.OpenCreditNoteFormMsg:
 		m.currentView = ViewCreditNotes
-		m.creditNotesView.OpenFormForInvoice(msg.InvoiceID, msg.InvoiceNumber)
+		m.creditNotesView.OpenFormForInvoice(msg.InvoiceID, msg.InvoiceNumber, msg.TotalHT, msg.VATAmount)
 		return m, m.creditNotesView.Load()
 
-	case views.CreditNotesLoadedMsg, views.CreditNoteSavedMsg, views.CreditNotePDFMsg:
+	case views.CreditNotesLoadedMsg, views.CreditNoteSavedMsg:
 		var cmd tea.Cmd
 		m.creditNotesView, cmd = m.creditNotesView.Update(msg)
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
 
-	case views.QuotesLoadedMsg, views.QuoteSavedMsg, views.QuotePDFMsg, views.QuoteStateChangedMsg:
+	case views.CreditNotePDFMsg:
+		if msg.Err != nil {
+			m.showToast("PDF avoir : "+msg.Err.Error(), ToastError)
+		} else {
+			m.showToast("PDF généré : "+msg.Path, ToastSuccess)
+		}
+		var cmd tea.Cmd
+		m.creditNotesView, cmd = m.creditNotesView.Update(msg)
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
+
+	case views.QuotesLoadedMsg, views.QuoteSavedMsg, views.QuoteStateChangedMsg:
+		var cmd tea.Cmd
+		m.quotesView, cmd = m.quotesView.Update(msg)
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
+
+	case views.QuotePDFMsg:
+		if msg.Err != nil {
+			m.showToast("PDF devis : "+msg.Err.Error(), ToastError)
+		} else {
+			m.showToast("PDF généré : "+msg.Path, ToastSuccess)
+		}
 		var cmd tea.Cmd
 		m.quotesView, cmd = m.quotesView.Update(msg)
 		cmds = append(cmds, cmd)

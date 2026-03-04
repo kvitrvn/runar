@@ -12,6 +12,7 @@ import (
 	"github.com/kvitrvn/runar/internal/service"
 	"github.com/kvitrvn/runar/internal/tui/components"
 	"github.com/kvitrvn/runar/internal/tui/styles"
+	"github.com/shopspring/decimal"
 )
 
 // CreditNoteMode représente le sous-mode de la vue avoirs.
@@ -65,11 +66,11 @@ func (v CreditNotesView) Load() tea.Cmd {
 }
 
 // OpenFormForInvoice ouvre le formulaire de création d'un avoir pour une facture donnée.
-func (v *CreditNotesView) OpenFormForInvoice(invoiceID int, invoiceNumber string) {
+func (v *CreditNotesView) OpenFormForInvoice(invoiceID int, invoiceNumber, totalHT, vatAmount string) {
 	v.invoiceID = invoiceID
 	v.invNumber = invoiceNumber
 	v.mode = CreditNoteModeForm
-	v.form = newCreditNoteForm(invoiceNumber, v.width)
+	v.form = newCreditNoteForm(invoiceNumber, totalHT, vatAmount, v.width)
 	v.err = ""
 }
 
@@ -203,10 +204,17 @@ func (v CreditNotesView) saveCreditNote() tea.Cmd {
 	svc := v.services.CreditNote
 	invoiceID := v.invoiceID
 	reason := v.form.Value(0)
+	htStr := v.form.Value(1)
+	vatStr := v.form.Value(2)
 	return func() tea.Msg {
+		totalHT, _ := decimal.NewFromString(htStr)
+		vatAmount, _ := decimal.NewFromString(vatStr)
 		cn := &domain.CreditNote{
 			IssueDate: time.Now(),
 			Reason:    reason,
+			TotalHT:   totalHT,
+			VATAmount: vatAmount,
+			TotalTTC:  totalHT.Add(vatAmount),
 		}
 		err := svc.CreateFromInvoice(invoiceID, cn)
 		return CreditNoteSavedMsg{Err: err}
@@ -321,9 +329,11 @@ func cnRows(cns []domain.CreditNote) []table.Row {
 	return rows
 }
 
-func newCreditNoteForm(invoiceNumber string, width int) *components.Form {
+func newCreditNoteForm(invoiceNumber, totalHT, vatAmount string, width int) *components.Form {
 	fields := []components.FormField{
 		components.NewField("Motif", "Erreur de facturation sur "+invoiceNumber, true),
+		components.NewField("Montant HT €", totalHT, true),
+		components.NewField("TVA €", vatAmount, false),
 	}
-	return components.NewForm("MOTIF DE L'AVOIR", fields, width)
+	return components.NewForm("NOUVEL AVOIR — "+invoiceNumber, fields, width)
 }

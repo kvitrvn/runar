@@ -258,17 +258,17 @@ func (r *creditNoteRepository) Create(cn *domain.CreditNote) error {
 
 func (r *creditNoteRepository) GetByID(id int) (*domain.CreditNote, error) {
 	type cnRow struct {
-		ID               int       `db:"id"`
-		Number           string    `db:"number"`
-		InvoiceID        int       `db:"invoice_id"`
-		InvoiceReference string    `db:"invoice_reference"`
-		IssueDate        time.Time `db:"issue_date"`
-		Reason           string    `db:"reason"`
-		TotalHT          string    `db:"total_ht"`
-		TotalTTC         string    `db:"total_ttc"`
-		VATAmount        string    `db:"vat_amount"`
-		PDFPath          string    `db:"pdf_path"`
-		CreatedAt        time.Time `db:"created_at"`
+		ID               int            `db:"id"`
+		Number           string         `db:"number"`
+		InvoiceID        int            `db:"invoice_id"`
+		InvoiceReference string         `db:"invoice_reference"`
+		IssueDate        time.Time      `db:"issue_date"`
+		Reason           string         `db:"reason"`
+		TotalHT          string         `db:"total_ht"`
+		TotalTTC         string         `db:"total_ttc"`
+		VATAmount        string         `db:"vat_amount"`
+		PDFPath          sql.NullString `db:"pdf_path"`
+		CreatedAt        time.Time      `db:"created_at"`
 	}
 	var row cnRow
 	if err := r.db.Get(&row, "SELECT * FROM credit_notes WHERE id = ?", id); err != nil {
@@ -281,7 +281,7 @@ func (r *creditNoteRepository) GetByID(id int) (*domain.CreditNote, error) {
 		InvoiceReference: row.InvoiceReference,
 		IssueDate:        row.IssueDate,
 		Reason:           row.Reason,
-		PDFPath:          row.PDFPath,
+		PDFPath:          row.PDFPath.String,
 		CreatedAt:        row.CreatedAt,
 	}
 	cn.TotalHT, _ = decimal.NewFromString(row.TotalHT)
@@ -292,17 +292,17 @@ func (r *creditNoteRepository) GetByID(id int) (*domain.CreditNote, error) {
 
 func (r *creditNoteRepository) GetByInvoiceID(invoiceID int) ([]domain.CreditNote, error) {
 	type cnRow struct {
-		ID               int       `db:"id"`
-		Number           string    `db:"number"`
-		InvoiceID        int       `db:"invoice_id"`
-		InvoiceReference string    `db:"invoice_reference"`
-		IssueDate        time.Time `db:"issue_date"`
-		Reason           string    `db:"reason"`
-		TotalHT          string    `db:"total_ht"`
-		TotalTTC         string    `db:"total_ttc"`
-		VATAmount        string    `db:"vat_amount"`
-		PDFPath          string    `db:"pdf_path"`
-		CreatedAt        time.Time `db:"created_at"`
+		ID               int            `db:"id"`
+		Number           string         `db:"number"`
+		InvoiceID        int            `db:"invoice_id"`
+		InvoiceReference string         `db:"invoice_reference"`
+		IssueDate        time.Time      `db:"issue_date"`
+		Reason           string         `db:"reason"`
+		TotalHT          string         `db:"total_ht"`
+		TotalTTC         string         `db:"total_ttc"`
+		VATAmount        string         `db:"vat_amount"`
+		PDFPath          sql.NullString `db:"pdf_path"`
+		CreatedAt        time.Time      `db:"created_at"`
 	}
 	var rows []cnRow
 	if err := r.db.Select(&rows,
@@ -314,7 +314,7 @@ func (r *creditNoteRepository) GetByInvoiceID(invoiceID int) ([]domain.CreditNot
 		cns[i] = domain.CreditNote{
 			ID: row.ID, Number: row.Number, InvoiceID: row.InvoiceID,
 			InvoiceReference: row.InvoiceReference, IssueDate: row.IssueDate,
-			Reason: row.Reason, PDFPath: row.PDFPath, CreatedAt: row.CreatedAt,
+			Reason: row.Reason, PDFPath: row.PDFPath.String, CreatedAt: row.CreatedAt,
 		}
 		cns[i].TotalHT, _ = decimal.NewFromString(row.TotalHT)
 		cns[i].TotalTTC, _ = decimal.NewFromString(row.TotalTTC)
@@ -324,17 +324,17 @@ func (r *creditNoteRepository) GetByInvoiceID(invoiceID int) ([]domain.CreditNot
 
 func (r *creditNoteRepository) List() ([]domain.CreditNote, error) {
 	type cnRow struct {
-		ID               int       `db:"id"`
-		Number           string    `db:"number"`
-		InvoiceID        int       `db:"invoice_id"`
-		InvoiceReference string    `db:"invoice_reference"`
-		IssueDate        time.Time `db:"issue_date"`
-		Reason           string    `db:"reason"`
-		TotalHT          string    `db:"total_ht"`
-		TotalTTC         string    `db:"total_ttc"`
-		VATAmount        string    `db:"vat_amount"`
-		PDFPath          string    `db:"pdf_path"`
-		CreatedAt        time.Time `db:"created_at"`
+		ID               int            `db:"id"`
+		Number           string         `db:"number"`
+		InvoiceID        int            `db:"invoice_id"`
+		InvoiceReference string         `db:"invoice_reference"`
+		IssueDate        time.Time      `db:"issue_date"`
+		Reason           string         `db:"reason"`
+		TotalHT          string         `db:"total_ht"`
+		TotalTTC         string         `db:"total_ttc"`
+		VATAmount        string         `db:"vat_amount"`
+		PDFPath          sql.NullString `db:"pdf_path"`
+		CreatedAt        time.Time      `db:"created_at"`
 	}
 	var rows []cnRow
 	if err := r.db.Select(&rows, "SELECT * FROM credit_notes ORDER BY issue_date DESC"); err != nil {
@@ -345,7 +345,7 @@ func (r *creditNoteRepository) List() ([]domain.CreditNote, error) {
 		cns[i] = domain.CreditNote{
 			ID: row.ID, Number: row.Number, InvoiceID: row.InvoiceID,
 			InvoiceReference: row.InvoiceReference, IssueDate: row.IssueDate,
-			Reason: row.Reason, PDFPath: row.PDFPath, CreatedAt: row.CreatedAt,
+			Reason: row.Reason, PDFPath: row.PDFPath.String, CreatedAt: row.CreatedAt,
 		}
 		cns[i].TotalHT, _ = decimal.NewFromString(row.TotalHT)
 		cns[i].TotalTTC, _ = decimal.NewFromString(row.TotalTTC)

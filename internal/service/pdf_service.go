@@ -363,6 +363,15 @@ func buildCreditNotePDF(cn *domain.CreditNote, seller *appcfg.Seller) core.Marot
 		),
 	)
 
+	if len(cn.Lines) == 0 {
+		m.AddRows(
+			row.New(7).Add(
+				col.New(8).WithStyle(cellBorder).Add(text.New("Avoir — "+cn.Reason, txtNormal)),
+				col.New(2).WithStyle(cellBorder).Add(text.New("1", txtCenter)),
+				col.New(2).WithStyle(cellBorder).Add(text.New(cn.TotalHT.StringFixed(2)+" €", txtRight)),
+			),
+		)
+	}
 	for i, line := range cn.Lines {
 		cell := cellBorder
 		if i%2 == 1 {
