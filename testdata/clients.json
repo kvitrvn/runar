@@ -1,0 +1,21 @@
+[
+  {
+    "name": "Acme SARL",
+    "siret": "73282932000074",
+    "siren": "732829320",
+    "address": "10 Rue du Commerce",
+    "postal_code": "75015",
+    "city": "Paris",
+    "country": "France",
+    "email": "contact@acme.fr",
+    "phone": "+33 1 23 45 67 89"
+  },
+  {
+    "name": "Jean Dupont",
+    "address": "5 Avenue de la République",
+    "postal_code": "69001",
+    "city": "Lyon",
+    "country": "France",
+    "email": "jean.dupont@example.com"
+  }
+]

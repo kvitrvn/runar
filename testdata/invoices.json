@@ -1,0 +1,24 @@
+[
+  {
+    "number": "2026-0001",
+    "client_name": "Acme SARL",
+    "issue_date": "2026-01-15",
+    "due_date": "2026-02-14",
+    "delivery_date": "2026-01-15",
+    "state": "paid",
+    "lines": [
+      {
+        "description": "Développement web - Janvier 2026",
+        "quantity": "1",
+        "unit_price_ht": "2500.00",
+        "vat_rate": "0"
+      }
+    ],
+    "total_ht": "2500.00",
+    "total_ttc": "2500.00",
+    "vat_exemption_text": "TVA non applicable, article 293B du CGI",
+    "payment_deadline": "30 jours",
+    "late_penalty_rate": "13.25",
+    "recovery_fee": "40"
+  }
+]
