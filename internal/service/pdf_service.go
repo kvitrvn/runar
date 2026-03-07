@@ -515,6 +515,19 @@ func buildQuotePDF(q *domain.Quote, cfg *appcfg.Config) core.Maroto {
 		),
 	)
 
+	// ── Section acompte (conditionnelle)
+	if q.RequiresDeposit() {
+		depositText := fmt.Sprintf("Acompte demandé : %.0f%% = %s €",
+			q.DepositRate.InexactFloat64(), q.DepositAmount().StringFixed(2))
+		m.AddRow(4) // espace
+		m.AddRow(7,
+			col.New(8),
+			col.New(4).Add(text.New(depositText,
+				props.Text{Size: 10, Style: fontstyle.Bold, Align: align.Right,
+					Color: &props.Color{Red: 245, Green: 158, Blue: 11}})),
+		)
+	}
+
 	m.AddRow(8) // espace
 	m.AddRow(6, col.New(12).Add(text.New(
 		"Devis valable jusqu'au "+q.ExpiryDate.Format("02/01/2006")+". Pour accepter, merci de nous retourner ce document signé.",

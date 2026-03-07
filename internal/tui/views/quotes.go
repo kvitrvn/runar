@@ -33,6 +33,7 @@ type QuotePDFMsg struct{ Path string; Err error }
 type QuoteStateChangedMsg struct{ Err error }
 type QuoteConvertedMsg struct{ InvoiceNumber string; Err error }
 type QuoteDetailLoadedMsg struct{ Quote *domain.Quote; Err error }
+type QuoteDepositPaidMsg struct{ Err error }
 
 // OpenQuoteFormForClientMsg est envoyé depuis la vue clients pour créer un devis.
 type OpenQuoteFormForClientMsg struct {
@@ -72,6 +73,8 @@ type quoteForm struct {
 	lines       []quoteLineEntry
 	focusedLine int
 	cfg         *config.Config
+	// depositRate est le taux d'acompte saisi (0 = pas d'acompte)
+	depositRate string
 }
 
 func newQuoteForm(cfg *config.Config, width int) *quoteForm {
@@ -83,15 +86,20 @@ func newQuoteForm(cfg *config.Config, width int) *quoteForm {
 }
 
 // buildQuoteBasicForm construit le formulaire d'infos de base (sans champ client).
-func buildQuoteBasicForm(width int, clientName string) *components.Form {
+func buildQuoteBasicForm(width int, clientName string, defaultDepositRate float64) *components.Form {
 	title := "NOUVEAU DEVIS — Informations"
 	if clientName != "" {
 		title += "  [" + clientName + "]"
+	}
+	depositDefault := "0"
+	if defaultDepositRate > 0 {
+		depositDefault = fmt.Sprintf("%.0f", defaultDepositRate)
 	}
 	return components.NewForm(title, []components.FormField{
 		components.NewField("Date émission", time.Now().Format("2006-01-02"), true),
 		components.NewField("Date expiration", time.Now().AddDate(0, 0, 30).Format("2006-01-02"), true),
 		components.NewField("Notes", "", false),
+		components.NewField("Taux d'acompte (%)", depositDefault, false),
 	}, width)
 }
 
@@ -101,7 +109,7 @@ func newQuoteFormForClient(cfg *config.Config, width int, clientID int, clientNa
 		step:       quoteStepBasic,
 		clientID:   clientID,
 		clientName: clientName,
-		basicForm:  buildQuoteBasicForm(width, clientName),
+		basicForm:  buildQuoteBasicForm(width, clientName, cfg.Payment.DefaultDepositRate),
 		cfg:        cfg,
 	}
 }
@@ -134,6 +142,11 @@ func (f *quoteForm) buildQuote() (*domain.Quote, error) {
 		IssueDate:  issueDate,
 		ExpiryDate: expiryDate,
 		Notes:      bf.Value(2),
+	}
+
+	// Taux d'acompte (champ optionnel, index 3)
+	if rateStr := bf.Value(3); rateStr != "" && rateStr != "0" {
+		q.DepositRate, _ = decimal.NewFromString(rateStr)
 	}
 
 	for i, le := range f.lines {
@@ -273,6 +286,22 @@ func (v QuotesView) Update(msg tea.Msg) (QuotesView, tea.Cmd) {
 			v.err = ""
 		}
 
+	case QuoteDepositPaidMsg:
+		if msg.Err != nil {
+			v.err = msg.Err.Error()
+		} else {
+			v.err = ""
+			// Recharger le devis pour mettre à jour l'affichage
+			if v.selected != nil {
+				svc := v.services.Quote
+				id := v.selected.ID
+				return v, func() tea.Msg {
+					q, err := svc.GetByID(id)
+					return QuoteDetailLoadedMsg{Quote: q, Err: err}
+				}
+			}
+		}
+
 	case quotePickerClientsMsg:
 		if msg.Err != nil {
 			v.formErr = msg.Err.Error()
@@ -337,6 +366,9 @@ func (v QuotesView) handleListKey(msg tea.KeyMsg) (QuotesView, tea.Cmd) {
 			if sel.CanConvertToInvoice() {
 				v.selected = sel
 				v.mode = QuoteModeConfirmConvert
+			} else if sel.State == domain.QuoteStateAccepted && sel.RequiresDeposit() && !sel.DepositPaid {
+				v.err = fmt.Sprintf("Acompte de %s€ non encaissé — ouvrez le détail (Enter) et marquez-le payé ('d')",
+					sel.DepositAmount().StringFixed(2))
 			} else {
 				v.err = fmt.Sprintf("Seul un devis accepté peut être converti (état: %s)", sel.State)
 			}
@@ -380,7 +412,7 @@ func (v QuotesView) handleFormKey(msg tea.KeyMsg) (QuotesView, tea.Cmd) {
 				v.form.clientID = sel.ID
 				v.form.clientName = sel.Name
 				v.form.step = quoteStepBasic
-				v.form.basicForm = buildQuoteBasicForm(v.width, sel.Name)
+				v.form.basicForm = buildQuoteBasicForm(v.width, sel.Name, v.config.Payment.DefaultDepositRate)
 				v.formErr = ""
 			}
 		}
@@ -475,10 +507,20 @@ func (v QuotesView) handleDetailKey(msg tea.KeyMsg) (QuotesView, tea.Cmd) {
 		if v.selected != nil {
 			return v, v.changeState(v.selected.ID, "refused")
 		}
+	case "d":
+		// Marquer l'acompte comme payé (deposit paid)
+		if v.selected != nil && v.selected.State == domain.QuoteStateAccepted &&
+			v.selected.RequiresDeposit() && !v.selected.DepositPaid {
+			return v, v.markDepositPaid(v.selected.ID)
+		}
 	case "f":
 		if v.selected != nil {
 			if v.selected.CanConvertToInvoice() {
 				v.mode = QuoteModeConfirmConvert
+			} else if v.selected.State == domain.QuoteStateAccepted &&
+				v.selected.RequiresDeposit() && !v.selected.DepositPaid {
+				v.err = fmt.Sprintf("Acompte de %s€ non encaissé — marquez-le payé (touche 'd') avant de convertir",
+					v.selected.DepositAmount().StringFixed(2))
 			} else {
 				v.err = fmt.Sprintf("Seul un devis accepté peut être converti (état: %s)", v.selected.State)
 			}
@@ -542,6 +584,13 @@ func (v QuotesView) generatePDF(id int) tea.Cmd {
 	return func() tea.Msg {
 		path, err := svc.GeneratePDF(id)
 		return QuotePDFMsg{Path: path, Err: err}
+	}
+}
+
+func (v QuotesView) markDepositPaid(id int) tea.Cmd {
+	svc := v.services.Quote
+	return func() tea.Msg {
+		return QuoteDepositPaidMsg{Err: svc.MarkDepositAsPaid(id)}
 	}
 }
 
@@ -759,6 +808,28 @@ func (v QuotesView) renderDetail() string {
 	totalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5CF6")).Bold(true)
 	content.WriteString(totalStyle.Render(fmt.Sprintf("  %-50s%12s€", "TOTAL HT", q.TotalHT.StringFixed(2))) + "\n")
 	content.WriteString(totalStyle.Render(fmt.Sprintf("  %-50s%12s€", "TOTAL TTC", q.TotalTTC.StringFixed(2))) + "\n")
+
+	// Section acompte (conditionnelle)
+	if q.RequiresDeposit() {
+		content.WriteString("\n")
+		depositStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true)
+		depositLabel := fmt.Sprintf("Acompte demandé : %.0f%% = %s€",
+			q.DepositRate.InexactFloat64(), q.DepositAmount().StringFixed(2))
+		if q.DepositPaid {
+			paidAt := ""
+			if q.DepositPaidAt != nil {
+				paidAt = " (encaissé le " + q.DepositPaidAt.Format("02/01/2006") + ")"
+			}
+			content.WriteString(styles.StyleSuccess.Render("  ✓ "+depositLabel+" — Payé"+paidAt) + "\n")
+		} else {
+			content.WriteString(depositStyle.Render("  ⏳ "+depositLabel+" — En attente") + "\n")
+			if q.State == domain.QuoteStateAccepted {
+				content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Italic(true).
+					Render("     Marquez l'acompte payé (d) avant de convertir en facture") + "\n")
+			}
+		}
+	}
+
 	if q.PDFPath != "" {
 		content.WriteString("\n" + styles.StyleSuccess.Render("  PDF : "+q.PDFPath) + "\n")
 	}
@@ -770,6 +841,9 @@ func (v QuotesView) renderDetail() string {
 	}
 	if q.State == domain.QuoteStateDraft || q.State == domain.QuoteStateSent {
 		actions = append(actions, "a: Accepter", "r: Refuser")
+	}
+	if q.State == domain.QuoteStateAccepted && q.RequiresDeposit() && !q.DepositPaid {
+		actions = append(actions, "d: Acompte payé")
 	}
 	if q.CanConvertToInvoice() {
 		actions = append(actions, "f: → Facture")

@@ -190,13 +190,7 @@ func (inv *Invoice) Validate() []ValidationError {
 				Fine:    fineAmount(),
 			})
 		}
-		if line.UnitPriceHT.LessThan(decimal.Zero) {
-			errors = append(errors, ValidationError{
-				Field:   fmt.Sprintf("lines[%d].unit_price_ht", i),
-				Message: "Prix unitaire HT ne peut pas être négatif",
-				Fine:    fineAmount(),
-			})
-		}
+		// Les lignes de déduction (acompte, avoir partiel) peuvent avoir un prix négatif : autorisé.
 	}
 
 	// LEGAL: Mention TVA exacte obligatoire si franchise en base (Art. 293B CGI)

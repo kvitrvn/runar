@@ -36,6 +36,8 @@ type Payment struct {
 	// Coordonnées bancaires pour paiement par virement.
 	IBAN string `mapstructure:"iban"`
 	BIC  string `mapstructure:"bic"`
+	// DefaultDepositRate est le taux d'acompte par défaut (0 = pas d'acompte).
+	DefaultDepositRate float64 `mapstructure:"default_deposit_rate"`
 }
 
 // DBConf configure la base de données.
@@ -68,6 +70,7 @@ func Load() (*Config, error) {
 	v.SetDefault("seller.country", "France")
 	v.SetDefault("payment.iban", "")
 	v.SetDefault("payment.bic", "")
+	v.SetDefault("payment.default_deposit_rate", 0.0)
 
 	// Chercher config dans répertoire courant et ~/.config/runar/
 	v.SetConfigName("config")
@@ -117,6 +120,7 @@ payment:
   recovery_fee: 40
   iban: "FR76 XXXX XXXX XXXX XXXX XXXX XXX"
   bic: "XXXXXXXX"
+  default_deposit_rate: 30
 
 database:
   path: "./runar.db"

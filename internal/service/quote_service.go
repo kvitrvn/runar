@@ -45,6 +45,11 @@ func NewQuoteService(
 func (s *QuoteService) Create(q *domain.Quote) error {
 	q.CalculateTotals()
 
+	// Appliquer le taux d'acompte par défaut si non spécifié et config > 0.
+	if q.DepositRate.IsZero() && s.cfg.Payment.DefaultDepositRate > 0 {
+		q.DepositRate = decimal.NewFromFloat(s.cfg.Payment.DefaultDepositRate)
+	}
+
 	number, err := s.generateNextNumber(q.IssueDate.Year())
 	if err != nil {
 		return err
@@ -57,6 +62,32 @@ func (s *QuoteService) Create(q *domain.Quote) error {
 	}
 
 	s.audit.Log("quote", q.ID, domain.AuditActionCreated, "", "")
+	return nil
+}
+
+// MarkDepositAsPaid marque l'acompte d'un devis accepté comme payé.
+func (s *QuoteService) MarkDepositAsPaid(id int) error {
+	q, err := s.quoteRepo.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if q.State != domain.QuoteStateAccepted {
+		return fmt.Errorf("l'acompte ne peut être marqué payé que sur un devis accepté (état: %s)", q.State)
+	}
+	if !q.RequiresDeposit() {
+		return fmt.Errorf("ce devis n'a pas d'acompte configuré")
+	}
+	if q.DepositPaid {
+		return fmt.Errorf("l'acompte est déjà marqué comme payé")
+	}
+	now := time.Now()
+	q.DepositPaid = true
+	q.DepositPaidAt = &now
+	if err := s.quoteRepo.Update(id, q); err != nil {
+		return err
+	}
+	s.audit.Log("quote", id, domain.AuditActionUpdated, "deposit_unpaid",
+		fmt.Sprintf(`{"action":"deposit_paid","amount":"%s"}`, q.DepositAmount().StringFixed(2)))
 	return nil
 }
 
@@ -160,6 +191,20 @@ func (s *QuoteService) PrepareInvoiceFromQuote(quoteID int) (*domain.Invoice, er
 		il.Calculate()
 		inv.Lines = append(inv.Lines, il)
 	}
+
+	// LEGAL: Si acompte payé, déduire en ligne négative sur la facture.
+	if q.DepositPaid && q.RequiresDeposit() {
+		depositLine := domain.InvoiceLine{
+			Description: fmt.Sprintf("Acompte versé (%.0f%%) - %s", q.DepositRate.InexactFloat64(), q.Number),
+			Quantity:    decimal.NewFromInt(1),
+			UnitPriceHT: q.DepositAmount().Neg(),
+			VATRate:     decimal.Zero,
+		}
+		depositLine.Calculate()
+		inv.Lines = append(inv.Lines, depositLine)
+	}
+
+	inv.CalculateTotals()
 
 	s.audit.Log("quote", quoteID, domain.AuditActionUpdated, string(domain.QuoteStateAccepted),
 		fmt.Sprintf(`{"action":"converted_to_invoice","client_id":%d}`, q.ClientID))

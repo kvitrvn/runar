@@ -21,13 +21,37 @@ type Quote struct {
 	VATAmount  decimal.Decimal
 	Notes      string
 	PDFPath    string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// Acompte
+	DepositRate   decimal.Decimal // pourcentage, 0 = pas d'acompte
+	DepositPaid   bool
+	DepositPaidAt *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+// RequiresDeposit retourne true si le devis a un acompte configuré (taux > 0).
+func (q *Quote) RequiresDeposit() bool {
+	return q.DepositRate.IsPositive()
+}
+
+// DepositAmount retourne le montant de l'acompte (TotalHT * DepositRate / 100), arrondi à 2 décimales.
+func (q *Quote) DepositAmount() decimal.Decimal {
+	if !q.RequiresDeposit() {
+		return decimal.Zero
+	}
+	return q.TotalHT.Mul(q.DepositRate).Div(decimal.NewFromInt(100)).Round(2)
 }
 
 // CanConvertToInvoice retourne true si le devis peut être converti en facture.
+// LEGAL: Un devis avec acompte ne peut être converti que si l'acompte est payé.
 func (q *Quote) CanConvertToInvoice() bool {
-	return q.State == QuoteStateAccepted
+	if q.State != QuoteStateAccepted {
+		return false
+	}
+	if q.RequiresDeposit() && !q.DepositPaid {
+		return false
+	}
+	return true
 }
 
 // IsExpired retourne true si le devis est expiré.
