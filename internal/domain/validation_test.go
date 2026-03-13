@@ -84,6 +84,59 @@ func TestValidateEmail(t *testing.T) {
 	}
 }
 
+// ─── IBAN ───────────────────────────────────────────────────────────────────
+
+func TestValidateIBAN(t *testing.T) {
+	tests := []struct {
+		name  string
+		iban  string
+		valid bool
+	}{
+		{"valide avec espaces", "FR76 3000 6000 0112 3456 7890 189", true},
+		{"valide sans espaces", "FR7630006000011234567890189", true},
+		{"minuscule", "fr7630006000011234567890189", true},
+		{"clé invalide", "FR7630006000011234567890188", false},
+		{"format invalide", "FR76-3000-6000-0112", false},
+		{"vide", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := domain.ValidateIBAN(tt.iban)
+			if got != tt.valid {
+				t.Errorf("ValidateIBAN(%q) = %v, attendu %v", tt.iban, got, tt.valid)
+			}
+		})
+	}
+}
+
+// ─── BIC ────────────────────────────────────────────────────────────────────
+
+func TestValidateBIC(t *testing.T) {
+	tests := []struct {
+		name  string
+		bic   string
+		valid bool
+	}{
+		{"8 caractères", "AGRIFRPP", true},
+		{"11 caractères", "AGRIFRPPXXX", true},
+		{"avec espaces", "agri frpp xxx", true},
+		{"trop court", "AGRIFRP", false},
+		{"pays invalide", "AGRI1RPP", false},
+		{"caractère invalide", "AGRIFRP!", false},
+		{"vide", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := domain.ValidateBIC(tt.bic)
+			if got != tt.valid {
+				t.Errorf("ValidateBIC(%q) = %v, attendu %v", tt.bic, got, tt.valid)
+			}
+		})
+	}
+}
+
 // ─── SIRET issu d'un SIREN valide ────────────────────────────────────────────
 
 func TestSIRET_ContientSIREN(t *testing.T) {

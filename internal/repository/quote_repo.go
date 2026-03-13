@@ -32,22 +32,23 @@ type CreditNoteRepository interface {
 }
 
 type quoteRow struct {
-	ID             int            `db:"id"`
-	Number         string         `db:"number"`
-	ClientID       int            `db:"client_id"`
-	IssueDate      time.Time      `db:"issue_date"`
-	ExpiryDate     time.Time      `db:"expiry_date"`
-	State          string         `db:"state"`
-	TotalHT        string         `db:"total_ht"`
-	TotalTTC       string         `db:"total_ttc"`
-	VATAmount      string         `db:"vat_amount"`
-	Notes          sql.NullString `db:"notes"`
-	PDFPath        sql.NullString `db:"pdf_path"`
-	DepositRate    string         `db:"deposit_rate"`
-	DepositPaid    int            `db:"deposit_paid"`
-	DepositPaidAt  sql.NullString `db:"deposit_paid_at"`
-	CreatedAt      time.Time      `db:"created_at"`
-	UpdatedAt      time.Time      `db:"updated_at"`
+	ID            int            `db:"id"`
+	Number        string         `db:"number"`
+	ClientID      int            `db:"client_id"`
+	IssueDate     time.Time      `db:"issue_date"`
+	ExpiryDate    time.Time      `db:"expiry_date"`
+	State         string         `db:"state"`
+	TotalHT       string         `db:"total_ht"`
+	TotalTTC      string         `db:"total_ttc"`
+	VATAmount     string         `db:"vat_amount"`
+	Notes         sql.NullString `db:"notes"`
+	PDFPath       sql.NullString `db:"pdf_path"`
+	DepositRate   string         `db:"deposit_rate"`
+	DepositPaid   int            `db:"deposit_paid"`
+	DepositPaidAt sql.NullString `db:"deposit_paid_at"`
+	DepositPayRef string         `db:"deposit_payment_ref"`
+	CreatedAt     time.Time      `db:"created_at"`
+	UpdatedAt     time.Time      `db:"updated_at"`
 	// Chargé par LEFT JOIN dans List() uniquement
 	ClientName sql.NullString `db:"client_name"`
 }
@@ -69,8 +70,11 @@ func (r *quoteRepository) Create(q *domain.Quote) error {
 	defer tx.Rollback() //nolint:errcheck
 
 	query := `
-		INSERT INTO quotes (number, client_id, issue_date, expiry_date, state, total_ht, total_ttc, vat_amount, notes, deposit_rate, deposit_paid, deposit_paid_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO quotes (
+			number, client_id, issue_date, expiry_date, state, total_ht, total_ttc, vat_amount,
+			notes, deposit_rate, deposit_paid, deposit_paid_at, deposit_payment_ref
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	var depositPaidAt any
 	if q.DepositPaidAt != nil {
@@ -83,7 +87,7 @@ func (r *quoteRepository) Create(q *domain.Quote) error {
 	result, err := tx.Exec(query,
 		q.Number, q.ClientID, q.IssueDate, q.ExpiryDate, string(q.State),
 		q.TotalHT.String(), q.TotalTTC.String(), q.VATAmount.String(), nilIfEmpty(q.Notes),
-		q.DepositRate.String(), depositPaidInt, depositPaidAt,
+		q.DepositRate.String(), depositPaidInt, depositPaidAt, q.DepositPaymentRef,
 	)
 	if err != nil {
 		return fmt.Errorf("création devis: %w", err)
@@ -165,12 +169,12 @@ func (r *quoteRepository) Update(id int, q *domain.Quote) error {
 		UPDATE quotes SET
 			state = ?, total_ht = ?, total_ttc = ?, vat_amount = ?,
 			notes = ?, pdf_path = ?,
-			deposit_rate = ?, deposit_paid = ?, deposit_paid_at = ?,
+			deposit_rate = ?, deposit_paid = ?, deposit_paid_at = ?, deposit_payment_ref = ?,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`, string(q.State), q.TotalHT.String(), q.TotalTTC.String(), q.VATAmount.String(),
 		nilIfEmpty(q.Notes), nilIfEmpty(q.PDFPath),
-		q.DepositRate.String(), depositPaidInt, depositPaidAt,
+		q.DepositRate.String(), depositPaidInt, depositPaidAt, q.DepositPaymentRef,
 		id)
 	return err
 }
@@ -181,17 +185,18 @@ func (r *quoteRepository) GetByID(id int) (*domain.Quote, error) {
 		return nil, fmt.Errorf("devis %d introuvable: %w", id, err)
 	}
 	q := domain.Quote{
-		ID:          row.ID,
-		Number:      row.Number,
-		ClientID:    row.ClientID,
-		IssueDate:   row.IssueDate,
-		ExpiryDate:  row.ExpiryDate,
-		State:       domain.QuoteState(row.State),
-		Notes:       row.Notes.String,
-		PDFPath:     row.PDFPath.String,
-		DepositPaid: row.DepositPaid != 0,
-		CreatedAt:   row.CreatedAt,
-		UpdatedAt:   row.UpdatedAt,
+		ID:                row.ID,
+		Number:            row.Number,
+		ClientID:          row.ClientID,
+		IssueDate:         row.IssueDate,
+		ExpiryDate:        row.ExpiryDate,
+		State:             domain.QuoteState(row.State),
+		Notes:             row.Notes.String,
+		PDFPath:           row.PDFPath.String,
+		DepositPaid:       row.DepositPaid != 0,
+		DepositPaymentRef: row.DepositPayRef,
+		CreatedAt:         row.CreatedAt,
+		UpdatedAt:         row.UpdatedAt,
 	}
 	q.TotalHT, _ = decimal.NewFromString(row.TotalHT)
 	q.TotalTTC, _ = decimal.NewFromString(row.TotalTTC)
@@ -230,13 +235,14 @@ func (r *quoteRepository) List(search string) ([]domain.Quote, error) {
 	quotes := make([]domain.Quote, len(rows))
 	for i, row := range rows {
 		q := domain.Quote{
-			ID:          row.ID,
-			Number:      row.Number,
-			ClientID:    row.ClientID,
-			IssueDate:   row.IssueDate,
-			ExpiryDate:  row.ExpiryDate,
-			State:       domain.QuoteState(row.State),
-			DepositPaid: row.DepositPaid != 0,
+			ID:                row.ID,
+			Number:            row.Number,
+			ClientID:          row.ClientID,
+			IssueDate:         row.IssueDate,
+			ExpiryDate:        row.ExpiryDate,
+			State:             domain.QuoteState(row.State),
+			DepositPaid:       row.DepositPaid != 0,
+			DepositPaymentRef: row.DepositPayRef,
 		}
 		q.TotalHT, _ = decimal.NewFromString(row.TotalHT)
 		q.TotalTTC, _ = decimal.NewFromString(row.TotalTTC)

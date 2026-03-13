@@ -27,12 +27,24 @@ const (
 )
 
 // Messages internes.
-type QuotesLoadedMsg struct{ Quotes []domain.Quote; Err error }
+type QuotesLoadedMsg struct {
+	Quotes []domain.Quote
+	Err    error
+}
 type QuoteSavedMsg struct{ Err error }
-type QuotePDFMsg struct{ Path string; Err error }
+type QuotePDFMsg struct {
+	Path string
+	Err  error
+}
 type QuoteStateChangedMsg struct{ Err error }
-type QuoteConvertedMsg struct{ InvoiceNumber string; Err error }
-type QuoteDetailLoadedMsg struct{ Quote *domain.Quote; Err error }
+type QuoteConvertedMsg struct {
+	InvoiceNumber string
+	Err           error
+}
+type QuoteDetailLoadedMsg struct {
+	Quote *domain.Quote
+	Err   error
+}
 type QuoteDepositPaidMsg struct{ Err error }
 
 // OpenQuoteFormForClientMsg est envoyé depuis la vue clients pour créer un devis.
@@ -687,10 +699,10 @@ func (v QuotesView) renderForm() string {
 	} else {
 		hs := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
 		sb.WriteString(
-			"  "+hs.Copy().Width(40).Render("DESCRIPTION")+
-				"  "+hs.Copy().Width(8).Align(lipgloss.Right).Render("QTÉ")+
-				"  "+hs.Copy().Width(13).Align(lipgloss.Right).Render("PRIX HT")+
-				"  "+hs.Copy().Width(13).Align(lipgloss.Right).Render("TOTAL HT")+"\n")
+			"  " + hs.Copy().Width(40).Render("DESCRIPTION") +
+				"  " + hs.Copy().Width(8).Align(lipgloss.Right).Render("QTÉ") +
+				"  " + hs.Copy().Width(13).Align(lipgloss.Right).Render("PRIX HT") +
+				"  " + hs.Copy().Width(13).Align(lipgloss.Right).Render("TOTAL HT") + "\n")
 		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
 			Render(strings.Repeat("─", 82)) + "\n")
 
@@ -786,10 +798,10 @@ func (v QuotesView) renderDetail() string {
 	if len(q.Lines) > 0 {
 		hd := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
 		content.WriteString(
-			"  "+hd.Copy().Width(30).Render("DESCRIPTION")+
-				"  "+hd.Copy().Width(6).Align(lipgloss.Right).Render("QTÉ")+
-				"  "+hd.Copy().Width(12).Align(lipgloss.Right).Render("PU HT")+
-				"  "+hd.Copy().Width(12).Align(lipgloss.Right).Render("TOTAL HT")+"\n")
+			"  " + hd.Copy().Width(30).Render("DESCRIPTION") +
+				"  " + hd.Copy().Width(6).Align(lipgloss.Right).Render("QTÉ") +
+				"  " + hd.Copy().Width(12).Align(lipgloss.Right).Render("PU HT") +
+				"  " + hd.Copy().Width(12).Align(lipgloss.Right).Render("TOTAL HT") + "\n")
 		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
 			Render(strings.Repeat("─", 68)) + "\n")
 		rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#D1D5DB"))
@@ -828,6 +840,16 @@ func (v QuotesView) renderDetail() string {
 					Render("     Marquez l'acompte payé (d) avant de convertir en facture") + "\n")
 			}
 		}
+	}
+
+	if info := service.GetQuoteDepositPaymentInfo(q, v.config); info != nil {
+		pmt := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+		content.WriteString("\n")
+		content.WriteString(pmt.Render("  Coordonnées bancaires pour l'acompte") + "\n")
+		content.WriteString(pmt.Render("  Montant à payer : "+info.Amount+"€") + "\n")
+		content.WriteString(pmt.Render("  IBAN : "+info.IBAN) + "\n")
+		content.WriteString(pmt.Render("  BIC  : "+info.BIC) + "\n")
+		content.WriteString(pmt.Render("  Libellé virement : "+info.PaymentRef) + "\n")
 	}
 
 	if q.PDFPath != "" {

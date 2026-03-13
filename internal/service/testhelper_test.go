@@ -13,6 +13,11 @@ import (
 
 // setupServices crée des services avec une DB SQLite en mémoire.
 func setupServices(t *testing.T) *service.Services {
+	return setupServicesWithConfig(t, nil)
+}
+
+// setupServicesWithConfig crée des services avec une configuration personnalisable.
+func setupServicesWithConfig(t *testing.T, mutate func(*config.Config)) *service.Services {
 	t.Helper()
 
 	db, err := repository.InitDB(":memory:")
@@ -23,6 +28,9 @@ func setupServices(t *testing.T) *service.Services {
 
 	repos := repository.NewRepositories(db)
 	cfg := testConfig(t)
+	if mutate != nil {
+		mutate(cfg)
+	}
 	return service.NewServices(repos, cfg)
 }
 

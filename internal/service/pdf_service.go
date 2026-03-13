@@ -528,6 +528,21 @@ func buildQuotePDF(q *domain.Quote, cfg *appcfg.Config) core.Maroto {
 		)
 	}
 
+	if info := GetQuoteDepositPaymentInfo(q, cfg); info != nil {
+		m.AddRow(6) // espace
+		m.AddRow(6, col.New(12).Add(text.New("COORDONNÉES BANCAIRES",
+			props.Text{Size: 9, Style: fontstyle.Bold, Color: colorGray})))
+		m.AddRow(5, col.New(12).Add(text.New("Montant de l'acompte : "+info.Amount+" €", txtSmall)))
+		m.AddRow(5, col.New(12).Add(text.New("IBAN : "+info.IBAN, txtSmall)))
+		m.AddRow(5, col.New(12).Add(text.New("BIC  : "+info.BIC, txtSmall)))
+		m.AddRow(5, col.New(12).Add(text.New("Libellé virement : "+info.PaymentRef,
+			props.Text{Size: 10, Style: fontstyle.Bold, Color: colorBlack})))
+		m.AddRow(5, col.New(12).Add(text.New(
+			"Merci d'indiquer ce libellé lors du paiement de l'acompte par virement bancaire.",
+			props.Text{Size: 9, Style: fontstyle.Italic, Color: colorGray},
+		)))
+	}
+
 	m.AddRow(8) // espace
 	m.AddRow(6, col.New(12).Add(text.New(
 		"Devis valable jusqu'au "+q.ExpiryDate.Format("02/01/2006")+". Pour accepter, merci de nous retourner ce document signé.",

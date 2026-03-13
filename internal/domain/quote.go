@@ -22,11 +22,12 @@ type Quote struct {
 	Notes      string
 	PDFPath    string
 	// Acompte
-	DepositRate   decimal.Decimal // pourcentage, 0 = pas d'acompte
-	DepositPaid   bool
-	DepositPaidAt *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	DepositRate       decimal.Decimal // pourcentage, 0 = pas d'acompte
+	DepositPaid       bool
+	DepositPaidAt     *time.Time
+	DepositPaymentRef string // Libellé virement unique pour l'acompte
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // RequiresDeposit retourne true si le devis a un acompte configuré (taux > 0).

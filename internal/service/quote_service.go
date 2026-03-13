@@ -49,6 +49,7 @@ func (s *QuoteService) Create(q *domain.Quote) error {
 	if q.DepositRate.IsZero() && s.cfg.Payment.DefaultDepositRate > 0 {
 		q.DepositRate = decimal.NewFromFloat(s.cfg.Payment.DefaultDepositRate)
 	}
+	assignQuoteDepositPaymentRef(q, s.cfg)
 
 	number, err := s.generateNextNumber(q.IssueDate.Year())
 	if err != nil {
