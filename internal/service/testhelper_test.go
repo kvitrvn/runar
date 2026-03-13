@@ -108,3 +108,25 @@ func createTestInvoice(t *testing.T, svc *service.Services, clientID int) *domai
 	}
 	return inv
 }
+
+// createTestQuote crée un devis de test valide.
+func createTestQuote(t *testing.T, svc *service.Services, clientID int) *domain.Quote {
+	t.Helper()
+	q := &domain.Quote{
+		ClientID:   clientID,
+		IssueDate:  time.Now(),
+		ExpiryDate: time.Now().Add(30 * 24 * time.Hour),
+		Lines: []domain.QuoteLine{
+			{
+				Description: "Prestation de service",
+				Quantity:    decimal.NewFromInt(1),
+				UnitPriceHT: decimal.NewFromInt(1000),
+				VATRate:     decimal.Zero,
+			},
+		},
+	}
+	if err := svc.Quote.Create(q); err != nil {
+		t.Fatalf("Création devis test: %v", err)
+	}
+	return q
+}

@@ -30,6 +30,16 @@ type Quote struct {
 	UpdatedAt         time.Time
 }
 
+// CanEdit retourne true si le devis peut être modifié.
+func (q *Quote) CanEdit() bool {
+	return q.State == QuoteStateDraft
+}
+
+// CanDelete retourne true si le devis peut être supprimé.
+func (q *Quote) CanDelete() bool {
+	return q.State == QuoteStateDraft
+}
+
 // RequiresDeposit retourne true si le devis a un acompte configuré (taux > 0).
 func (q *Quote) RequiresDeposit() bool {
 	return q.DepositRate.IsPositive()
