@@ -32,31 +32,31 @@ type InvoiceRepository interface {
 
 // invoiceRow représente une facture en SQL.
 type invoiceRow struct {
-	ID                  int            `db:"id"`
-	Number              string         `db:"number"`
-	ClientID            int            `db:"client_id"`
-	QuoteID             sql.NullInt64  `db:"quote_id"`
-	IssueDate           time.Time      `db:"issue_date"`
-	DueDate             time.Time      `db:"due_date"`
-	DeliveryDate        time.Time      `db:"delivery_date"`
-	PaidDate            sql.NullTime   `db:"paid_date"`
-	PaidLockedAt        sql.NullTime   `db:"paid_locked_at"`
-	State               string         `db:"state"`
-	TotalHT             string         `db:"total_ht"`
-	TotalTTC            string         `db:"total_ttc"`
-	VATAmount           string         `db:"vat_amount"`
-	VATApplicable       bool           `db:"vat_applicable"`
-	VATExemptionText    string         `db:"vat_exemption_text"`
-	PaymentDeadline     string         `db:"payment_deadline"`
-	LatePenaltyRate     string         `db:"late_penalty_rate"`
-	RecoveryFee         string         `db:"recovery_fee"`
-	EarlyPaymentDisc    sql.NullString `db:"early_payment_disc"`
-	OperationCategory   sql.NullString `db:"operation_category"`
-	DeliveryAddress     sql.NullString `db:"delivery_address"`
-	Notes               sql.NullString `db:"notes"`
-	PDFPath             sql.NullString `db:"pdf_path"`
-	CreatedAt           time.Time      `db:"created_at"`
-	UpdatedAt           time.Time      `db:"updated_at"`
+	ID                int            `db:"id"`
+	Number            string         `db:"number"`
+	ClientID          int            `db:"client_id"`
+	QuoteID           sql.NullInt64  `db:"quote_id"`
+	IssueDate         time.Time      `db:"issue_date"`
+	DueDate           time.Time      `db:"due_date"`
+	DeliveryDate      time.Time      `db:"delivery_date"`
+	PaidDate          sql.NullTime   `db:"paid_date"`
+	PaidLockedAt      sql.NullTime   `db:"paid_locked_at"`
+	State             string         `db:"state"`
+	TotalHT           string         `db:"total_ht"`
+	TotalTTC          string         `db:"total_ttc"`
+	VATAmount         string         `db:"vat_amount"`
+	VATApplicable     bool           `db:"vat_applicable"`
+	VATExemptionText  string         `db:"vat_exemption_text"`
+	PaymentDeadline   string         `db:"payment_deadline"`
+	LatePenaltyRate   string         `db:"late_penalty_rate"`
+	RecoveryFee       string         `db:"recovery_fee"`
+	EarlyPaymentDisc  sql.NullString `db:"early_payment_disc"`
+	OperationCategory sql.NullString `db:"operation_category"`
+	DeliveryAddress   sql.NullString `db:"delivery_address"`
+	Notes             sql.NullString `db:"notes"`
+	PDFPath           sql.NullString `db:"pdf_path"`
+	CreatedAt         time.Time      `db:"created_at"`
+	UpdatedAt         time.Time      `db:"updated_at"`
 	// Colonnes migration 003 (e-facturation 2027)
 	EInvoiceFormat   sql.NullString `db:"e_invoice_format"`
 	EInvoiceXML      sql.NullString `db:"e_invoice_xml"`
@@ -209,14 +209,14 @@ func (r *invoiceRepository) createLine(tx *sqlx.Tx, line *domain.InvoiceLine) er
 		VALUES (:invoice_id, :line_order, :description, :quantity, :unit_price_ht, :vat_rate, :total_ht, :total_ttc)
 	`
 	row := map[string]interface{}{
-		"invoice_id":   line.InvoiceID,
-		"line_order":   line.LineOrder,
-		"description":  line.Description,
-		"quantity":     line.Quantity.String(),
+		"invoice_id":    line.InvoiceID,
+		"line_order":    line.LineOrder,
+		"description":   line.Description,
+		"quantity":      line.Quantity.String(),
 		"unit_price_ht": line.UnitPriceHT.String(),
-		"vat_rate":     line.VATRate.String(),
-		"total_ht":     line.TotalHT.String(),
-		"total_ttc":    line.TotalTTC.String(),
+		"vat_rate":      line.VATRate.String(),
+		"total_ht":      line.TotalHT.String(),
+		"total_ttc":     line.TotalTTC.String(),
 	}
 	result, err := tx.NamedExec(query, row)
 	if err != nil {

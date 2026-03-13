@@ -7,13 +7,13 @@ import "time"
 // LEGAL: Conservation 6 ans minimum (durée du droit de contrôle fiscal).
 type AuditLog struct {
 	ID         int
-	EntityType string    // "invoice", "quote", "client", "credit_note"
+	EntityType string // "invoice", "quote", "client", "credit_note"
 	EntityID   int
-	Action     string    // "created", "updated", "paid_and_locked", "pdf_generated", etc.
-	UserID     string    // Toujours "owner" pour un auto-entrepreneur
-	OldValue   string    // JSON de l'état avant modification
-	NewValue   string    // JSON de l'état après modification
-	IPAddress  string    // Optionnel
+	Action     string // "created", "updated", "paid_and_locked", "pdf_generated", etc.
+	UserID     string // Toujours "owner" pour un auto-entrepreneur
+	OldValue   string // JSON de l'état avant modification
+	NewValue   string // JSON de l'état après modification
+	IPAddress  string // Optionnel
 	Timestamp  time.Time
 }
 

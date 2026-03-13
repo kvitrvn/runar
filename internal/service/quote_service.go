@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -66,6 +67,62 @@ func (s *QuoteService) Create(q *domain.Quote) error {
 	return nil
 }
 
+// Update met à jour un devis brouillon.
+func (s *QuoteService) Update(id int, updates *domain.Quote) error {
+	existing, err := s.quoteRepo.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if !existing.CanEdit() {
+		s.audit.Log("quote", id, domain.AuditActionDenied,
+			string(existing.State),
+			"tentative de modification d'un devis non brouillon",
+		)
+		return fmt.Errorf("seul un devis brouillon peut être modifié (état: %s)", existing.State)
+	}
+
+	updates.ID = existing.ID
+	updates.Number = existing.Number
+	updates.State = existing.State
+	updates.CreatedAt = existing.CreatedAt
+	updates.DepositPaid = false
+	updates.DepositPaidAt = nil
+	updates.PDFPath = ""
+	updates.DepositPaymentRef = existing.DepositPaymentRef
+	if !updates.RequiresDeposit() {
+		updates.DepositPaymentRef = ""
+	} else {
+		assignQuoteDepositPaymentRef(updates, s.cfg)
+	}
+	updates.CalculateTotals()
+
+	oldVal, _ := json.Marshal(existing)
+	if err := s.quoteRepo.Replace(id, updates); err != nil {
+		return err
+	}
+	newVal, _ := json.Marshal(updates)
+	s.audit.Log("quote", id, domain.AuditActionUpdated, string(oldVal), string(newVal))
+	return nil
+}
+
+// Delete supprime définitivement un devis brouillon.
+func (s *QuoteService) Delete(id int) error {
+	q, err := s.quoteRepo.GetByID(id)
+	if err != nil {
+		return err
+	}
+	if !q.CanDelete() {
+		return fmt.Errorf("seul un brouillon peut être supprimé (état: %s)", q.State)
+	}
+
+	oldVal, _ := json.Marshal(q)
+	if err := s.quoteRepo.Delete(id); err != nil {
+		return err
+	}
+	s.audit.Log("quote", id, domain.AuditActionDeleted, string(oldVal), "")
+	return nil
+}
+
 // MarkDepositAsPaid marque l'acompte d'un devis accepté comme payé.
 func (s *QuoteService) MarkDepositAsPaid(id int) error {
 	q, err := s.quoteRepo.GetByID(id)
@@ -94,7 +151,14 @@ func (s *QuoteService) MarkDepositAsPaid(id int) error {
 
 // GetByID retourne un devis par son ID.
 func (s *QuoteService) GetByID(id int) (*domain.Quote, error) {
-	return s.quoteRepo.GetByID(id)
+	q, err := s.quoteRepo.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.loadClient(q); err != nil {
+		return nil, err
+	}
+	return q, nil
 }
 
 // List retourne la liste des devis.
@@ -218,12 +282,8 @@ func (s *QuoteService) GeneratePDF(id int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if q.Client == nil && q.ClientID > 0 {
-		client, err := s.clientRepo.GetByID(q.ClientID)
-		if err != nil {
-			return "", fmt.Errorf("chargement client devis: %w", err)
-		}
-		q.Client = client
+	if err := s.loadClient(q); err != nil {
+		return "", err
 	}
 	pdfPath, err := s.pdf.GenerateQuote(q)
 	if err != nil {
@@ -243,6 +303,19 @@ func (s *QuoteService) generateNextNumber(year int) (string, error) {
 		return "", err
 	}
 	return s.numbering.FormatQuoteNumber(year, lastSeq+1), nil
+}
+
+func (s *QuoteService) loadClient(q *domain.Quote) error {
+	if q == nil || q.Client != nil || q.ClientID <= 0 {
+		return nil
+	}
+
+	client, err := s.clientRepo.GetByID(q.ClientID)
+	if err != nil {
+		return fmt.Errorf("chargement client devis: %w", err)
+	}
+	q.Client = client
+	return nil
 }
 
 // CreditNoteService gère les opérations sur les avoirs.

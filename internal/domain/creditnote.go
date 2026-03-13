@@ -13,7 +13,7 @@ type CreditNote struct {
 	ID               int
 	Number           string // Ex: "A-2026-0001"
 	InvoiceID        int
-	InvoiceReference string    // Numéro et date de la facture d'origine (obligatoire)
+	InvoiceReference string // Numéro et date de la facture d'origine (obligatoire)
 	IssueDate        time.Time
 	Reason           string  // Motif de l'avoir (obligatoire)
 	Client           *Client // Relation chargée à la demande (depuis la facture d'origine)

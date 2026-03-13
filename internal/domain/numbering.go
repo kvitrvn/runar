@@ -4,10 +4,10 @@ import "fmt"
 
 // NumberingConfig définit le format de numérotation.
 type NumberingConfig struct {
-	InvoicePrefix   string // "" → "2026-0001"
-	QuotePrefix     string // "DEV" → "DEV-2026-0001"
+	InvoicePrefix    string // "" → "2026-0001"
+	QuotePrefix      string // "DEV" → "DEV-2026-0001"
 	CreditNotePrefix string // "A" → "A-2026-0001"
-	SequenceWidth   int    // 4 → padding 4 chiffres
+	SequenceWidth    int    // 4 → padding 4 chiffres
 }
 
 // DefaultNumberingConfig retourne la configuration par défaut.

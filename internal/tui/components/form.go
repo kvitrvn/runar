@@ -46,8 +46,8 @@ func NewField(label, defaultValue string, required bool) FormField {
 
 // Form est un formulaire de saisie multi-champs.
 type Form struct {
-	Title  string
-	Fields []FormField
+	Title   string
+	Fields  []FormField
 	focused int
 	width   int
 }

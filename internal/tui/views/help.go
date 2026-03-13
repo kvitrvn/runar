@@ -54,6 +54,8 @@ var clientBindings = []KeyBinding{
 // quoteBindings liste les raccourcis spécifiques aux devis.
 var quoteBindings = []KeyBinding{
 	{Key: "n", Description: "Nouveau devis", Category: "Devis"},
+	{Key: "e", Description: "Éditer le devis brouillon", Category: "Devis"},
+	{Key: "d", Description: "Supprimer le devis brouillon", Category: "Devis"},
 	{Key: "s", Description: "Marquer envoyé", Category: "Devis"},
 	{Key: "a", Description: "Accepter le devis", Category: "Devis"},
 	{Key: "r", Description: "Refuser le devis", Category: "Devis"},

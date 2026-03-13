@@ -29,14 +29,23 @@ const (
 )
 
 // Messages internes.
-type InvoicesLoadedMsg struct{ Invoices []domain.Invoice; Err error }
+type InvoicesLoadedMsg struct {
+	Invoices []domain.Invoice
+	Err      error
+}
 type InvoiceSavedMsg struct{ Err error }
 type InvoicePaidMsg struct{ Err error }
 type InvoiceDeletedMsg struct{ Err error }
 type InvoiceIssuedMsg struct{ Err error }
 type InvoiceSentMsg struct{ Err error }
-type InvoicePDFMsg struct{ Path string; Err error }
-type InvoiceDetailLoadedMsg struct{ Invoice *domain.Invoice; Err error }
+type InvoicePDFMsg struct {
+	Path string
+	Err  error
+}
+type InvoiceDetailLoadedMsg struct {
+	Invoice *domain.Invoice
+	Err     error
+}
 type OpenCreditNoteFormMsg struct {
 	InvoiceID     int
 	InvoiceNumber string
@@ -781,10 +790,10 @@ func (v InvoicesView) renderForm() string {
 		// et aligne avec les données (%12s€ = 13 chars visuels → Width(13))
 		hs := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
 		sb.WriteString(
-			"  "+hs.Copy().Width(40).Render("DESCRIPTION")+
-				"  "+hs.Copy().Width(8).Align(lipgloss.Right).Render("QTÉ")+
-				"  "+hs.Copy().Width(13).Align(lipgloss.Right).Render("PRIX HT")+
-				"  "+hs.Copy().Width(13).Align(lipgloss.Right).Render("TOTAL HT")+"\n")
+			"  " + hs.Copy().Width(40).Render("DESCRIPTION") +
+				"  " + hs.Copy().Width(8).Align(lipgloss.Right).Render("QTÉ") +
+				"  " + hs.Copy().Width(13).Align(lipgloss.Right).Render("PRIX HT") +
+				"  " + hs.Copy().Width(13).Align(lipgloss.Right).Render("TOTAL HT") + "\n")
 		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
 			Render(strings.Repeat("─", 82)) + "\n")
 
@@ -903,10 +912,10 @@ func (v InvoicesView) renderDetail() string {
 		// 4 colonnes : desc(30) + qty(6) + pu(12) + total(12) = 2+30+2+6+2+12+2+12 = 68 chars
 		hd := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
 		content.WriteString(
-			"  "+hd.Copy().Width(30).Render("DESCRIPTION")+
-				"  "+hd.Copy().Width(6).Align(lipgloss.Right).Render("QTÉ")+
-				"  "+hd.Copy().Width(12).Align(lipgloss.Right).Render("PU HT")+
-				"  "+hd.Copy().Width(12).Align(lipgloss.Right).Render("TOTAL HT")+"\n")
+			"  " + hd.Copy().Width(30).Render("DESCRIPTION") +
+				"  " + hd.Copy().Width(6).Align(lipgloss.Right).Render("QTÉ") +
+				"  " + hd.Copy().Width(12).Align(lipgloss.Right).Render("PU HT") +
+				"  " + hd.Copy().Width(12).Align(lipgloss.Right).Render("TOTAL HT") + "\n")
 		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
 			Render(strings.Repeat("─", 68)) + "\n")
 		rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#D1D5DB"))

@@ -8,9 +8,9 @@ import (
 
 func TestClient_IsCompany(t *testing.T) {
 	tests := []struct {
-		name  string
-		c     domain.Client
-		want  bool
+		name string
+		c    domain.Client
+		want bool
 	}{
 		{"avec SIRET", domain.Client{SIRET: "73282932000074"}, true},
 		{"avec SIREN", domain.Client{SIREN: "732829320"}, true},

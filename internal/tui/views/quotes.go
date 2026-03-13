@@ -24,6 +24,7 @@ const (
 	QuoteModeForm                     // formulaire création
 	QuoteModeDetail                   // vue détail
 	QuoteModeConfirmConvert           // confirmation conversion en facture
+	QuoteModeConfirmDelete            // confirmation suppression brouillon
 )
 
 // Messages internes.
@@ -32,6 +33,7 @@ type QuotesLoadedMsg struct {
 	Err    error
 }
 type QuoteSavedMsg struct{ Err error }
+type QuoteDeletedMsg struct{ Err error }
 type QuotePDFMsg struct {
 	Path string
 	Err  error
@@ -44,6 +46,11 @@ type QuoteConvertedMsg struct {
 type QuoteDetailLoadedMsg struct {
 	Quote *domain.Quote
 	Err   error
+}
+type QuoteEditLoadedMsg struct {
+	Quote      *domain.Quote
+	ClientName string
+	Err        error
 }
 type QuoteDepositPaidMsg struct{ Err error }
 
@@ -97,32 +104,80 @@ func newQuoteForm(cfg *config.Config, width int) *quoteForm {
 	}
 }
 
-// buildQuoteBasicForm construit le formulaire d'infos de base (sans champ client).
-func buildQuoteBasicForm(width int, clientName string, defaultDepositRate float64) *components.Form {
-	title := "NOUVEAU DEVIS — Informations"
+func quoteBasicFormTitle(action, clientName string) string {
+	title := action + " — Informations"
 	if clientName != "" {
 		title += "  [" + clientName + "]"
 	}
-	depositDefault := "0"
-	if defaultDepositRate > 0 {
-		depositDefault = fmt.Sprintf("%.0f", defaultDepositRate)
+	return title
+}
+
+func formatQuoteDepositRate(rate decimal.Decimal) string {
+	if rate.IsZero() {
+		return "0"
 	}
+	return rate.String()
+}
+
+// buildQuoteBasicForm construit le formulaire d'infos de base (sans champ client).
+func buildQuoteBasicForm(width int, action, clientName, issueDate, expiryDate, notes, depositRate string) *components.Form {
+	title := quoteBasicFormTitle(action, clientName)
 	return components.NewForm(title, []components.FormField{
-		components.NewField("Date émission", time.Now().Format("2006-01-02"), true),
-		components.NewField("Date expiration", time.Now().AddDate(0, 0, 30).Format("2006-01-02"), true),
-		components.NewField("Notes", "", false),
-		components.NewField("Taux d'acompte (%)", depositDefault, false),
+		components.NewField("Date émission", issueDate, true),
+		components.NewField("Date expiration", expiryDate, true),
+		components.NewField("Notes", notes, false),
+		components.NewField("Taux d'acompte (%)", depositRate, false),
 	}, width)
 }
 
 // newQuoteFormForClient ouvre directement l'étape infos (client pré-rempli).
 func newQuoteFormForClient(cfg *config.Config, width int, clientID int, clientName string) *quoteForm {
+	depositDefault := "0"
+	if cfg.Payment.DefaultDepositRate > 0 {
+		depositDefault = fmt.Sprintf("%.0f", cfg.Payment.DefaultDepositRate)
+	}
 	return &quoteForm{
 		step:       quoteStepBasic,
 		clientID:   clientID,
 		clientName: clientName,
-		basicForm:  buildQuoteBasicForm(width, clientName, cfg.Payment.DefaultDepositRate),
-		cfg:        cfg,
+		basicForm: buildQuoteBasicForm(
+			width,
+			"NOUVEAU DEVIS",
+			clientName,
+			time.Now().Format("2006-01-02"),
+			time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
+			"",
+			depositDefault,
+		),
+		cfg: cfg,
+	}
+}
+
+func newQuoteFormForEdit(cfg *config.Config, width int, q *domain.Quote, clientName string) *quoteForm {
+	lines := make([]quoteLineEntry, len(q.Lines))
+	for i, line := range q.Lines {
+		lines[i] = quoteLineEntry{
+			description: line.Description,
+			quantity:    line.Quantity.String(),
+			unitPrice:   line.UnitPriceHT.StringFixed(2),
+		}
+	}
+
+	return &quoteForm{
+		step:       quoteStepBasic,
+		clientID:   q.ClientID,
+		clientName: clientName,
+		basicForm: buildQuoteBasicForm(
+			width,
+			"ÉDITER DEVIS",
+			clientName,
+			q.IssueDate.Format("2006-01-02"),
+			q.ExpiryDate.Format("2006-01-02"),
+			q.Notes,
+			formatQuoteDepositRate(q.DepositRate),
+		),
+		lines: lines,
+		cfg:   cfg,
 	}
 }
 
@@ -184,19 +239,20 @@ func (f *quoteForm) buildQuote() (*domain.Quote, error) {
 
 // QuotesView est la vue complète de gestion des devis.
 type QuotesView struct {
-	services *service.Services
-	config   *config.Config
-	mode     QuoteMode
-	quotes   []domain.Quote
-	filtered []domain.Quote
-	table    components.TableModel
-	form     *quoteForm
-	selected *domain.Quote
-	search   string
-	err      string
-	formErr  string
-	width    int
-	height   int
+	services  *service.Services
+	config    *config.Config
+	mode      QuoteMode
+	quotes    []domain.Quote
+	filtered  []domain.Quote
+	table     components.TableModel
+	form      *quoteForm
+	editingID int
+	selected  *domain.Quote
+	search    string
+	err       string
+	formErr   string
+	width     int
+	height    int
 }
 
 // NewQuotesView crée la vue devis.
@@ -216,6 +272,7 @@ func NewQuotesView(services *service.Services, cfg *config.Config, width, height
 func (v *QuotesView) OpenFormForClient(clientID int, clientName string) {
 	v.mode = QuoteModeForm
 	v.form = newQuoteFormForClient(v.config, v.width, clientID, clientName)
+	v.editingID = 0
 	v.formErr = ""
 }
 
@@ -265,7 +322,21 @@ func (v QuotesView) Update(msg tea.Msg) (QuotesView, tea.Cmd) {
 		} else {
 			v.mode = QuoteModeList
 			v.form = nil
+			v.editingID = 0
+			v.selected = nil
 			v.formErr = ""
+			return v, v.Load(v.search)
+		}
+
+	case QuoteDeletedMsg:
+		if msg.Err != nil {
+			v.err = msg.Err.Error()
+			v.mode = QuoteModeList
+			v.selected = nil
+		} else {
+			v.mode = QuoteModeList
+			v.selected = nil
+			v.err = ""
 			return v, v.Load(v.search)
 		}
 
@@ -295,6 +366,18 @@ func (v QuotesView) Update(msg tea.Msg) (QuotesView, tea.Cmd) {
 		} else {
 			v.selected = msg.Quote
 			v.mode = QuoteModeDetail
+			v.err = ""
+		}
+
+	case QuoteEditLoadedMsg:
+		if msg.Err != nil {
+			v.err = msg.Err.Error()
+		} else {
+			v.mode = QuoteModeForm
+			v.form = newQuoteFormForEdit(v.config, v.width, msg.Quote, msg.ClientName)
+			v.editingID = msg.Quote.ID
+			v.selected = nil
+			v.formErr = ""
 			v.err = ""
 		}
 
@@ -331,6 +414,8 @@ func (v QuotesView) Update(msg tea.Msg) (QuotesView, tea.Cmd) {
 			return v.handleDetailKey(msg)
 		case QuoteModeConfirmConvert:
 			return v.handleConfirmConvertKey(msg)
+		case QuoteModeConfirmDelete:
+			return v.handleConfirmDeleteKey(msg)
 		}
 	}
 
@@ -354,11 +439,28 @@ func (v QuotesView) handleListKey(msg tea.KeyMsg) (QuotesView, tea.Cmd) {
 	case "n":
 		v.mode = QuoteModeForm
 		v.form = newQuoteForm(v.config, v.width)
+		v.editingID = 0
 		v.formErr = ""
 		svc := v.services.Client
 		return v, func() tea.Msg {
 			clients, err := svc.List("")
 			return quotePickerClientsMsg{Clients: clients, Err: err}
+		}
+	case "e":
+		if sel := v.selectedQuote(); sel != nil {
+			if sel.CanEdit() {
+				return v, v.loadQuoteForEdit(sel.ID, quoteClientLabel(sel))
+			}
+			v.err = "Seuls les brouillons peuvent être modifiés"
+		}
+	case "d":
+		if sel := v.selectedQuote(); sel != nil {
+			if sel.CanDelete() {
+				v.selected = sel
+				v.mode = QuoteModeConfirmDelete
+			} else {
+				v.err = "Seuls les brouillons peuvent être supprimés"
+			}
 		}
 	case "s":
 		if sel := v.selectedQuote(); sel != nil {
@@ -418,13 +520,26 @@ func (v QuotesView) handleFormKey(msg tea.KeyMsg) (QuotesView, tea.Cmd) {
 		case pickerCancelled:
 			v.mode = QuoteModeList
 			v.form = nil
+			v.editingID = 0
 			v.formErr = ""
 		case pickerSelected:
 			if sel := v.form.picker.Selected(); sel != nil {
 				v.form.clientID = sel.ID
 				v.form.clientName = sel.Name
 				v.form.step = quoteStepBasic
-				v.form.basicForm = buildQuoteBasicForm(v.width, sel.Name, v.config.Payment.DefaultDepositRate)
+				depositDefault := "0"
+				if v.config.Payment.DefaultDepositRate > 0 {
+					depositDefault = fmt.Sprintf("%.0f", v.config.Payment.DefaultDepositRate)
+				}
+				v.form.basicForm = buildQuoteBasicForm(
+					v.width,
+					"NOUVEAU DEVIS",
+					sel.Name,
+					time.Now().Format("2006-01-02"),
+					time.Now().AddDate(0, 0, 30).Format("2006-01-02"),
+					"",
+					depositDefault,
+				)
 				v.formErr = ""
 			}
 		}
@@ -437,6 +552,7 @@ func (v QuotesView) handleFormKey(msg tea.KeyMsg) (QuotesView, tea.Cmd) {
 		case components.FormEventCancel:
 			v.mode = QuoteModeList
 			v.form = nil
+			v.editingID = 0
 			v.formErr = ""
 		case components.FormEventSubmit:
 			v.form.step = quoteStepLines
@@ -507,6 +623,18 @@ func (v QuotesView) handleDetailKey(msg tea.KeyMsg) (QuotesView, tea.Cmd) {
 		v.mode = QuoteModeList
 		v.selected = nil
 		v.err = ""
+	case "e":
+		if v.selected != nil {
+			if v.selected.CanEdit() {
+				v.mode = QuoteModeForm
+				v.form = newQuoteFormForEdit(v.config, v.width, v.selected, quoteClientLabel(v.selected))
+				v.editingID = v.selected.ID
+				v.formErr = ""
+				v.err = ""
+			} else {
+				v.err = "Seuls les brouillons peuvent être modifiés"
+			}
+		}
 	case "s":
 		if v.selected != nil {
 			return v, v.changeState(v.selected.ID, "sent")
@@ -520,10 +648,16 @@ func (v QuotesView) handleDetailKey(msg tea.KeyMsg) (QuotesView, tea.Cmd) {
 			return v, v.changeState(v.selected.ID, "refused")
 		}
 	case "d":
-		// Marquer l'acompte comme payé (deposit paid)
-		if v.selected != nil && v.selected.State == domain.QuoteStateAccepted &&
-			v.selected.RequiresDeposit() && !v.selected.DepositPaid {
-			return v, v.markDepositPaid(v.selected.ID)
+		if v.selected != nil {
+			if v.selected.CanDelete() {
+				v.mode = QuoteModeConfirmDelete
+				return v, nil
+			}
+			// Marquer l'acompte comme payé (deposit paid)
+			if v.selected.State == domain.QuoteStateAccepted &&
+				v.selected.RequiresDeposit() && !v.selected.DepositPaid {
+				return v, v.markDepositPaid(v.selected.ID)
+			}
 		}
 	case "f":
 		if v.selected != nil {
@@ -561,17 +695,42 @@ func (v QuotesView) handleConfirmConvertKey(msg tea.KeyMsg) (QuotesView, tea.Cmd
 	return v, nil
 }
 
+func (v QuotesView) handleConfirmDeleteKey(msg tea.KeyMsg) (QuotesView, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		if v.selected != nil {
+			return v, v.deleteQuote(v.selected.ID)
+		}
+	case "n", "N", "esc":
+		v.mode = QuoteModeList
+		v.selected = nil
+	}
+	return v, nil
+}
+
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
 func (v QuotesView) saveQuote() tea.Cmd {
 	f := v.form
 	svc := v.services.Quote
+	editingID := v.editingID
 	return func() tea.Msg {
 		q, err := f.buildQuote()
 		if err != nil {
 			return QuoteSavedMsg{Err: err}
 		}
+		if editingID > 0 {
+			return QuoteSavedMsg{Err: svc.Update(editingID, q)}
+		}
 		return QuoteSavedMsg{Err: svc.Create(q)}
+	}
+}
+
+func (v QuotesView) loadQuoteForEdit(id int, clientName string) tea.Cmd {
+	svc := v.services.Quote
+	return func() tea.Msg {
+		q, err := svc.GetByID(id)
+		return QuoteEditLoadedMsg{Quote: q, ClientName: clientName, Err: err}
 	}
 }
 
@@ -603,6 +762,13 @@ func (v QuotesView) markDepositPaid(id int) tea.Cmd {
 	svc := v.services.Quote
 	return func() tea.Msg {
 		return QuoteDepositPaidMsg{Err: svc.MarkDepositAsPaid(id)}
+	}
+}
+
+func (v QuotesView) deleteQuote(id int) tea.Cmd {
+	svc := v.services.Quote
+	return func() tea.Msg {
+		return QuoteDeletedMsg{Err: svc.Delete(id)}
 	}
 }
 
@@ -647,6 +813,8 @@ func (v QuotesView) View() string {
 		return v.renderDetail()
 	case QuoteModeConfirmConvert:
 		return v.renderConfirmConvert()
+	case QuoteModeConfirmDelete:
+		return v.renderConfirmDelete()
 	default:
 		return v.renderList()
 	}
@@ -660,7 +828,7 @@ func (v QuotesView) renderList() string {
 	sb.WriteString(styles.StyleMuted.Render(fmt.Sprintf("  %d devis", len(v.filtered))) + "\n\n")
 	sb.WriteString(v.table.View() + "\n")
 	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(
-		"  n: Nouveau  s: Envoyer  a: Accepter  r: Refuser  f: → Facture  p: PDF  Enter: Détail",
+		"  n: Nouveau  e: Éditer  d: Supprimer  s: Envoyer  a: Accepter  r: Refuser  f: → Facture  p: PDF  Enter: Détail",
 	)
 	sb.WriteString(hint)
 	return sb.String()
@@ -692,19 +860,19 @@ func (v QuotesView) renderForm() string {
 	}
 
 	// Étape lignes
-	sb.WriteString(styles.StyleTitle.Render("NOUVEAU DEVIS — Lignes") + "\n\n")
+	title := "NOUVEAU DEVIS — Lignes"
+	if v.editingID > 0 {
+		title = "ÉDITER DEVIS — Lignes"
+	}
+	sb.WriteString(styles.StyleTitle.Render(title) + "\n\n")
 
 	if len(v.form.lines) == 0 {
 		sb.WriteString(styles.StyleMuted.Render("  Aucune ligne. Appuyez sur 'a' pour ajouter.\n\n"))
 	} else {
-		hs := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
-		sb.WriteString(
-			"  " + hs.Copy().Width(40).Render("DESCRIPTION") +
-				"  " + hs.Copy().Width(8).Align(lipgloss.Right).Render("QTÉ") +
-				"  " + hs.Copy().Width(13).Align(lipgloss.Right).Render("PRIX HT") +
-				"  " + hs.Copy().Width(13).Align(lipgloss.Right).Render("TOTAL HT") + "\n")
+		widths := quoteLineTableWidths(max(60, v.width-4))
+		sb.WriteString(renderQuoteLinesHeader(widths) + "\n")
 		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
-			Render(strings.Repeat("─", 82)) + "\n")
+			Render(strings.Repeat("─", widths.total)) + "\n")
 
 		for i, line := range v.form.lines {
 			qty, _ := decimal.NewFromString(line.quantity)
@@ -716,12 +884,13 @@ func (v QuotesView) renderForm() string {
 				lineStyle = lineStyle.Background(lipgloss.Color("#1E3A5F"))
 				prefix = "> "
 			}
-			sb.WriteString(lineStyle.Render(fmt.Sprintf("%s%-40s  %8s  %12s€  %12s€",
+			sb.WriteString(lineStyle.Render(renderQuoteLineRow(
 				prefix,
-				truncate(line.description, 40),
+				line.description,
 				line.quantity,
-				price.StringFixed(2),
-				total.StringFixed(2),
+				price.StringFixed(2)+"€",
+				total.StringFixed(2)+"€",
+				widths,
 			)) + "\n")
 		}
 
@@ -731,13 +900,13 @@ func (v QuotesView) renderForm() string {
 			q.CalculateTotals()
 			sb.WriteString("\n")
 			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
-				Render(strings.Repeat("─", 82)) + "\n")
+				Render(strings.Repeat("─", widths.total)) + "\n")
 			totalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5CF6")).Bold(true)
-			sb.WriteString(totalStyle.Render(fmt.Sprintf("  %-67s%12s€", "TOTAL HT", q.TotalHT.StringFixed(2))) + "\n")
+			sb.WriteString(totalStyle.Render(renderQuoteTotalRow("TOTAL HT", q.TotalHT.StringFixed(2)+"€", widths)) + "\n")
 			if v.form.cfg.VAT.Applicable {
-				sb.WriteString(totalStyle.Render(fmt.Sprintf("  %-67s%12s€", "TVA", q.VATAmount.StringFixed(2))) + "\n")
+				sb.WriteString(totalStyle.Render(renderQuoteTotalRow("TVA", q.VATAmount.StringFixed(2)+"€", widths)) + "\n")
 			}
-			sb.WriteString(totalStyle.Render(fmt.Sprintf("  %-67s%12s€", "TOTAL TTC", q.TotalTTC.StringFixed(2))) + "\n")
+			sb.WriteString(totalStyle.Render(renderQuoteTotalRow("TOTAL TTC", q.TotalTTC.StringFixed(2)+"€", widths)) + "\n")
 		}
 	}
 
@@ -782,11 +951,7 @@ func (v QuotesView) renderDetail() string {
 	}
 
 	content.WriteString(row("Numéro", q.Number))
-	clientLabel := fmt.Sprint(q.ClientID)
-	if q.Client != nil {
-		clientLabel = q.Client.Name
-	}
-	content.WriteString(row("Client", clientLabel))
+	content.WriteString(row("Client", quoteClientLabel(q)))
 	content.WriteString(row("État", renderQuoteState(q.State)))
 	content.WriteString(row("Date émission", q.IssueDate.Format("02/01/2006")))
 	content.WriteString(row("Date expiration", q.ExpiryDate.Format("02/01/2006")))
@@ -796,25 +961,23 @@ func (v QuotesView) renderDetail() string {
 	content.WriteString("\n")
 
 	if len(q.Lines) > 0 {
-		hd := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
-		content.WriteString(
-			"  " + hd.Copy().Width(30).Render("DESCRIPTION") +
-				"  " + hd.Copy().Width(6).Align(lipgloss.Right).Render("QTÉ") +
-				"  " + hd.Copy().Width(12).Align(lipgloss.Right).Render("PU HT") +
-				"  " + hd.Copy().Width(12).Align(lipgloss.Right).Render("TOTAL HT") + "\n")
+		widths := quoteLineTableWidths(max(56, v.width-12))
+		content.WriteString(renderQuoteLinesHeader(widths) + "\n")
 		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
-			Render(strings.Repeat("─", 68)) + "\n")
+			Render(strings.Repeat("─", widths.total)) + "\n")
 		rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#D1D5DB"))
 		for _, line := range q.Lines {
-			content.WriteString(rowStyle.Render(fmt.Sprintf("  %-30s  %6s  %11s€  %11s€",
-				truncate(line.Description, 30),
+			content.WriteString(rowStyle.Render(renderQuoteLineRow(
+				"  ",
+				line.Description,
 				line.Quantity.StringFixed(2),
-				line.UnitPriceHT.StringFixed(2),
-				line.TotalHT.StringFixed(2),
+				line.UnitPriceHT.StringFixed(2)+"€",
+				line.TotalHT.StringFixed(2)+"€",
+				widths,
 			)) + "\n")
 		}
 		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
-			Render(strings.Repeat("─", 68)) + "\n")
+			Render(strings.Repeat("─", widths.total)) + "\n")
 	}
 
 	totalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5CF6")).Bold(true)
@@ -859,7 +1022,7 @@ func (v QuotesView) renderDetail() string {
 	content.WriteString("\n")
 	var actions []string
 	if q.State == domain.QuoteStateDraft {
-		actions = append(actions, "s: Envoyer")
+		actions = append(actions, "e: Éditer", "d: Supprimer", "s: Envoyer")
 	}
 	if q.State == domain.QuoteStateDraft || q.State == domain.QuoteStateSent {
 		actions = append(actions, "a: Accepter", "r: Refuser")
@@ -882,16 +1045,12 @@ func (v QuotesView) renderConfirmConvert() string {
 		return ""
 	}
 	q := v.selected
-	clientLabel := fmt.Sprint(q.ClientID)
-	if q.Client != nil {
-		clientLabel = q.Client.Name
-	}
 	msg := fmt.Sprintf("Convertir le devis %s en FACTURE ?\n\n"+
 		"  Client     : %s\n"+
 		"  Total HT   : %s€\n"+
 		"  Total TTC  : %s€\n\n"+
 		"  Une nouvelle facture brouillon sera créée.",
-		q.Number, clientLabel, q.TotalHT.StringFixed(2), q.TotalTTC.StringFixed(2))
+		q.Number, quoteClientLabel(q), q.TotalHT.StringFixed(2), q.TotalTTC.StringFixed(2))
 	return "\n" + lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#8B5CF6")).
 		Bold(true).
@@ -904,7 +1063,100 @@ func (v QuotesView) renderConfirmConvert() string {
 			Render("  [Y] Confirmer  [N/Esc] Annuler")
 }
 
+func (v QuotesView) renderConfirmDelete() string {
+	if v.selected == nil {
+		return ""
+	}
+	msg := fmt.Sprintf("Supprimer le brouillon %s ?", v.selected.Number)
+	return "\n" + lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#EF4444")).
+		Bold(true).
+		Render("⚠  "+msg) +
+		"\n\n" +
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).
+			Render("  [Y] Confirmer  [N/Esc] Annuler")
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+type quoteLineWidths struct {
+	description int
+	quantity    int
+	unitPrice   int
+	totalHT     int
+	total       int
+}
+
+func quoteLineTableWidths(availableWidth int) quoteLineWidths {
+	widths := quoteLineWidths{
+		quantity:  8,
+		unitPrice: 13,
+		totalHT:   13,
+	}
+	if availableWidth < 72 {
+		widths.quantity = 6
+		widths.unitPrice = 11
+		widths.totalHT = 11
+	}
+
+	reserved := 2 + 2 + widths.quantity + 2 + widths.unitPrice + 2 + widths.totalHT
+	widths.description = max(18, availableWidth-reserved)
+	widths.total = 2 + widths.description + 2 + widths.quantity + 2 + widths.unitPrice + 2 + widths.totalHT
+	return widths
+}
+
+func renderQuoteLinesHeader(widths quoteLineWidths) string {
+	hd := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
+	gap := lipgloss.NewStyle().Render("  ")
+	return lipgloss.JoinHorizontal(lipgloss.Top,
+		lipgloss.NewStyle().Width(2).Render("  "),
+		hd.Copy().Width(widths.description).Render("DESCRIPTION"),
+		gap,
+		hd.Copy().Width(widths.quantity).Align(lipgloss.Right).Render("QTÉ"),
+		gap,
+		hd.Copy().Width(widths.unitPrice).Align(lipgloss.Right).Render("PU HT"),
+		gap,
+		hd.Copy().Width(widths.totalHT).Align(lipgloss.Right).Render("TOTAL HT"),
+	)
+}
+
+func renderQuoteLineRow(prefix, description, quantity, unitPrice, totalHT string, widths quoteLineWidths) string {
+	gap := lipgloss.NewStyle().Render("  ")
+	descStyle := lipgloss.NewStyle().Width(widths.description)
+	qtyStyle := lipgloss.NewStyle().Width(widths.quantity).Align(lipgloss.Right)
+	amountStyle := lipgloss.NewStyle().Width(widths.unitPrice).Align(lipgloss.Right)
+	totalStyle := lipgloss.NewStyle().Width(widths.totalHT).Align(lipgloss.Right)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top,
+		lipgloss.NewStyle().Width(2).Render(prefix),
+		descStyle.Render(description),
+		gap,
+		qtyStyle.Render(quantity),
+		gap,
+		amountStyle.Render(unitPrice),
+		gap,
+		totalStyle.Render(totalHT),
+	)
+}
+
+func renderQuoteTotalRow(label, amount string, widths quoteLineWidths) string {
+	labelWidth := max(12, widths.total-2-widths.totalHT)
+	return lipgloss.JoinHorizontal(lipgloss.Top,
+		lipgloss.NewStyle().Width(2).Render("  "),
+		lipgloss.NewStyle().Width(labelWidth).Render(label),
+		lipgloss.NewStyle().Width(widths.totalHT).Align(lipgloss.Right).Render(amount),
+	)
+}
+
+func quoteClientLabel(q *domain.Quote) string {
+	if q == nil {
+		return ""
+	}
+	if q.Client != nil && q.Client.Name != "" {
+		return q.Client.Name
+	}
+	return fmt.Sprint(q.ClientID)
+}
 
 func quoteColumns(width int) []table.Column {
 	// Colonnes fixes : ID(5)+NUMÉRO(14)+TTC(12)+ÉTAT(12)+ÉMISSION(12)+EXPIRATION(12) = 67 + 7*2 = 81

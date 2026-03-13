@@ -14,10 +14,12 @@ import (
 type QuoteRepository interface {
 	Create(quote *domain.Quote) error
 	Update(id int, quote *domain.Quote) error
+	Replace(id int, quote *domain.Quote) error
 	GetByID(id int) (*domain.Quote, error)
 	List(search string) ([]domain.Quote, error)
 	GetLastSequence(year int) (int, error)
 	NumberExists(number string) (bool, error)
+	Delete(id int) error
 }
 
 // CreditNoteRepository définit les opérations sur les avoirs.
@@ -179,6 +181,54 @@ func (r *quoteRepository) Update(id int, q *domain.Quote) error {
 	return err
 }
 
+func (r *quoteRepository) Replace(id int, q *domain.Quote) error {
+	tx, err := r.db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	var depositPaidAt any
+	if q.DepositPaidAt != nil {
+		depositPaidAt = q.DepositPaidAt.Format(time.RFC3339)
+	}
+	depositPaidInt := 0
+	if q.DepositPaid {
+		depositPaidInt = 1
+	}
+
+	_, err = tx.Exec(`
+		UPDATE quotes SET
+			client_id = ?, issue_date = ?, expiry_date = ?, state = ?,
+			total_ht = ?, total_ttc = ?, vat_amount = ?, notes = ?, pdf_path = ?,
+			deposit_rate = ?, deposit_paid = ?, deposit_paid_at = ?, deposit_payment_ref = ?,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, q.ClientID, q.IssueDate, q.ExpiryDate, string(q.State),
+		q.TotalHT.String(), q.TotalTTC.String(), q.VATAmount.String(),
+		nilIfEmpty(q.Notes), nilIfEmpty(q.PDFPath),
+		q.DepositRate.String(), depositPaidInt, depositPaidAt, q.DepositPaymentRef,
+		id)
+	if err != nil {
+		return fmt.Errorf("mise à jour devis: %w", err)
+	}
+
+	if _, err := tx.Exec("DELETE FROM quote_lines WHERE quote_id = ?", id); err != nil {
+		return fmt.Errorf("suppression lignes devis: %w", err)
+	}
+
+	q.ID = id
+	for i := range q.Lines {
+		q.Lines[i].QuoteID = id
+		q.Lines[i].LineOrder = i + 1
+		if err := createQuoteLine(tx, &q.Lines[i]); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (r *quoteRepository) GetByID(id int) (*domain.Quote, error) {
 	var row quoteRow
 	if err := r.db.Get(&row, "SELECT * FROM quotes WHERE id = ?", id); err != nil {
@@ -277,6 +327,11 @@ func (r *quoteRepository) NumberExists(number string) (bool, error) {
 	var count int
 	err := r.db.Get(&count, "SELECT COUNT(*) FROM quotes WHERE number = ?", number)
 	return count > 0, err
+}
+
+func (r *quoteRepository) Delete(id int) error {
+	_, err := r.db.Exec("DELETE FROM quotes WHERE id = ?", id)
+	return err
 }
 
 // creditNoteRepository implémente CreditNoteRepository.

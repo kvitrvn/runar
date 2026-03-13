@@ -8,6 +8,44 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+func TestQuote_CanEdit(t *testing.T) {
+	tests := []struct {
+		state domain.QuoteState
+		want  bool
+	}{
+		{domain.QuoteStateDraft, true},
+		{domain.QuoteStateSent, false},
+		{domain.QuoteStateAccepted, false},
+		{domain.QuoteStateRefused, false},
+		{domain.QuoteStateExpired, false},
+	}
+	for _, tt := range tests {
+		q := &domain.Quote{State: tt.state}
+		if got := q.CanEdit(); got != tt.want {
+			t.Errorf("CanEdit() state=%s = %v, attendu %v", tt.state, got, tt.want)
+		}
+	}
+}
+
+func TestQuote_CanDelete(t *testing.T) {
+	tests := []struct {
+		state domain.QuoteState
+		want  bool
+	}{
+		{domain.QuoteStateDraft, true},
+		{domain.QuoteStateSent, false},
+		{domain.QuoteStateAccepted, false},
+		{domain.QuoteStateRefused, false},
+		{domain.QuoteStateExpired, false},
+	}
+	for _, tt := range tests {
+		q := &domain.Quote{State: tt.state}
+		if got := q.CanDelete(); got != tt.want {
+			t.Errorf("CanDelete() state=%s = %v, attendu %v", tt.state, got, tt.want)
+		}
+	}
+}
+
 func TestQuote_CanConvertToInvoice(t *testing.T) {
 	tests := []struct {
 		state domain.QuoteState
