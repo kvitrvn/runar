@@ -4,6 +4,8 @@ CMD_DIR=./cmd/runar
 MODULE=github.com/kvitrvn/runar
 VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BUILD_FLAGS=-ldflags "-X main.Version=$(VERSION) -s -w"
+GO_GOBIN=$(strip $(or $(GOBIN),$(shell go env GOBIN)))
+INSTALL_DIR=$(if $(GO_GOBIN),$(GO_GOBIN),$(shell go env GOPATH)/bin)
 
 # Supprime les warnings C de go-sqlite3 (-Wdiscarded-qualifiers)
 export CGO_CFLAGS := -Wno-discarded-qualifiers
@@ -57,9 +59,11 @@ clean:
 	@rm -f coverage.out coverage.html
 	@echo "Cleaned."
 
-## install: Installe le binaire dans GOPATH/bin
+## install: Installe le binaire dans GOBIN ou GOPATH/bin
 install: build
-	cp $(BINARY_DIR)/$(BINARY_NAME) $(GOPATH)/bin/$(BINARY_NAME)
+	@mkdir -p $(INSTALL_DIR)
+	install -m 0755 $(BINARY_DIR)/$(BINARY_NAME) $(INSTALL_DIR)/$(BINARY_NAME)
+	@echo "Installed: $(INSTALL_DIR)/$(BINARY_NAME)"
 
 ## help: Affiche cette aide
 help:
