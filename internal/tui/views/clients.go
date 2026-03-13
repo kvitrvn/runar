@@ -25,10 +25,12 @@ const (
 )
 
 // Messages internes à la vue.
-type ClientsLoadedMsg struct{ Clients []domain.Client; Err error }
+type ClientsLoadedMsg struct {
+	Clients []domain.Client
+	Err     error
+}
 type ClientSavedMsg struct{ Err error }
 type ClientDeletedMsg struct{ Err error }
-
 
 // ClientsView est la vue complète de gestion des clients.
 type ClientsView struct {

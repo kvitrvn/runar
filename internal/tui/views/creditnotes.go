@@ -25,10 +25,19 @@ const (
 )
 
 // Messages internes.
-type CreditNotesLoadedMsg struct{ CreditNotes []domain.CreditNote; Err error }
+type CreditNotesLoadedMsg struct {
+	CreditNotes []domain.CreditNote
+	Err         error
+}
 type CreditNoteSavedMsg struct{ Err error }
-type CreditNotePDFMsg struct{ Path string; Err error }
-type CreditNoteDetailLoadedMsg struct{ CreditNote *domain.CreditNote; Err error }
+type CreditNotePDFMsg struct {
+	Path string
+	Err  error
+}
+type CreditNoteDetailLoadedMsg struct {
+	CreditNote *domain.CreditNote
+	Err        error
+}
 
 // CreditNotesView est la vue de gestion des avoirs.
 type CreditNotesView struct {
@@ -305,10 +314,10 @@ func (v CreditNotesView) renderDetail() string {
 	if len(cn.Lines) > 0 {
 		hd := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Bold(true)
 		content.WriteString(
-			"  "+hd.Copy().Width(30).Render("DESCRIPTION")+
-				"  "+hd.Copy().Width(6).Align(lipgloss.Right).Render("QTÉ")+
-				"  "+hd.Copy().Width(12).Align(lipgloss.Right).Render("PU HT")+
-				"  "+hd.Copy().Width(12).Align(lipgloss.Right).Render("TOTAL HT")+"\n")
+			"  " + hd.Copy().Width(30).Render("DESCRIPTION") +
+				"  " + hd.Copy().Width(6).Align(lipgloss.Right).Render("QTÉ") +
+				"  " + hd.Copy().Width(12).Align(lipgloss.Right).Render("PU HT") +
+				"  " + hd.Copy().Width(12).Align(lipgloss.Right).Render("TOTAL HT") + "\n")
 		content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#374151")).
 			Render(strings.Repeat("─", 68)) + "\n")
 		rowStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#D1D5DB"))

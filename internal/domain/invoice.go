@@ -21,7 +21,7 @@ func (e *ErrImmutableInvoice) Error() string {
 // Invoice représente une facture.
 type Invoice struct {
 	ID       int
-	Number   string  // Ex: "2026-0001"
+	Number   string // Ex: "2026-0001"
 	ClientID int
 	Client   *Client // Relation chargée à la demande
 	QuoteID  *int    // Lien vers le devis source, si conversion
@@ -62,10 +62,10 @@ type Invoice struct {
 	DeliveryAddress   string // Si différente de l'adresse client
 
 	// Métadonnées
-	Notes       string
-	PDFPath     string // LEGAL: PDF jamais supprimé
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	Notes     string
+	PDFPath   string // LEGAL: PDF jamais supprimé
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // CanEdit retourne true si la facture peut être modifiée.

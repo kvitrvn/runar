@@ -21,8 +21,8 @@ var (
 			Padding(0, 1)
 
 	StyleMainBorder = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(ColorMuted)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(ColorMuted)
 
 	StyleTitle = lipgloss.NewStyle().
 			Foreground(ColorPrimary).

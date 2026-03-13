@@ -11,12 +11,12 @@ import (
 
 // CommandBar est la barre de commande k9s-like (ligne 2 du layout).
 type CommandBar struct {
-	input       textinput.Model
-	active      bool   // true = mode commande ou recherche
-	prefix      string // ":" ou "/"
-	currentView string // Vue courante affichée en mode normal
-	hint        string // Hint affiché à droite
-	width       int
+	input        textinput.Model
+	active       bool   // true = mode commande ou recherche
+	prefix       string // ":" ou "/"
+	currentView  string // Vue courante affichée en mode normal
+	hint         string // Hint affiché à droite
+	width        int
 	autocomplete []string // Suggestions d'autocomplétion
 }
 
